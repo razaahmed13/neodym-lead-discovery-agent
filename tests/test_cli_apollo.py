@@ -1,6 +1,6 @@
 from typer.testing import CliRunner
 
-from neodym_lead_discovery.cli import app
+from neodym_lead_discovery.cli import DEFAULT_DB_PATH, app
 
 runner = CliRunner()
 
@@ -73,6 +73,29 @@ def test_discover_defaults_to_apollo_api_when_env_key_exists(monkeypatch, tmp_pa
     assert result.exit_code == 0
     assert calls == ["env-apollo-key"]
     assert "Imported 0 lead candidates" in result.output
+
+
+def test_discover_uses_project_default_db_when_db_option_is_omitted(monkeypatch, tmp_path):
+    calls = []
+
+    class FakeClient:
+        def __init__(self, api_key: str):
+            calls.append(api_key)
+
+    def fake_discover_from_apollo(**kwargs):
+        return []
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("APOLLO_API_KEY", "env-apollo-key")
+    monkeypatch.setattr("neodym_lead_discovery.cli.ApolloClient", FakeClient)
+    monkeypatch.setattr("neodym_lead_discovery.cli.discover_from_apollo", fake_discover_from_apollo)
+
+    result = runner.invoke(app, ["discover"])
+
+    assert result.exit_code == 0
+    assert calls == ["env-apollo-key"]
+    assert (tmp_path / DEFAULT_DB_PATH).exists()
+    assert f"Imported 0 lead candidates into {DEFAULT_DB_PATH}" in result.output
 
 
 def test_discover_reads_apollo_api_key_from_project_dotenv(monkeypatch, tmp_path):

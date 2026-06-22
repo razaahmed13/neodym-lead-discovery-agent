@@ -24,6 +24,8 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
+DEFAULT_DB_PATH = Path("data/lead_discovery.sqlite")
+
 
 def _env_value(name: str, dotenv_path: Path = Path(".env")) -> str:
     """Read an env var, falling back to a local .env file without exporting secrets."""
@@ -92,8 +94,11 @@ def discover(
     ] = False,
     db_path: Annotated[
         Path,
-        typer.Option("--db", help="SQLite database path."),
-    ] = Path("data/lead_discovery.sqlite"),
+        typer.Option(
+            "--db",
+            help="SQLite database path. Defaults to the shared project database.",
+        ),
+    ] = DEFAULT_DB_PATH,
     source: Annotated[str, typer.Option("--source", help="Discovery source label.")] = "csv",
     max_results: Annotated[
         int,
@@ -157,8 +162,11 @@ def discover(
 def enrich(
     db_path: Annotated[
         Path,
-        typer.Option("--db", help="SQLite database path."),
-    ] = Path("data/lead_discovery.sqlite"),
+        typer.Option(
+            "--db",
+            help="SQLite database path. Defaults to the shared project database.",
+        ),
+    ] = DEFAULT_DB_PATH,
     limit: Annotated[
         int | None,
         typer.Option("--limit", min=1, help="Maximum candidates to enrich."),
