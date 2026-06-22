@@ -4,9 +4,9 @@
 
 **Goal:** Build a local-first AI-assisted system that discovers, enriches, scores, and reports US-based company leads that are genuinely relevant for Neodym's AI consulting, automation, and product development services.
 
-**Architecture:** Use a Python CLI pipeline with clear stages: candidate ingestion, normalization, enrichment, AI analysis, scoring, reporting, evaluation, and optional weekly digest delivery. Keep data-source adapters and AI-provider adapters modular so the MVP can operate with approved tooling/free tiers now while remaining ready for future production LLM APIs.
+**Architecture:** Use a Python CLI pipeline backed by a lightweight custom state machine with clear stages: Apollo/CSV seed import, normalization, website enrichment, Codex CLI reasoning, deterministic status-based scoring, reporting, evaluation, and optional weekly digest delivery. Keep stage interfaces modular so LangGraph can replace the custom state machine later if cyclic re-scrape/retry workflows become necessary.
 
-**Tech Stack:** Python 3.11+, `uv`, Typer CLI, Pydantic models, SQLite for local persistence/cache, pytest, ruff, httpx/BeautifulSoup for public web enrichment, optional Playwright later for dynamic pages, provider interface for Hermes/Codex/manual JSON now and OpenAI-compatible APIs later.
+**Tech Stack:** Python 3.11+, `uv`, Typer CLI, Pydantic models, SQLite for local persistence/cache, pytest, ruff, httpx/BeautifulSoup/markdownify for public web enrichment, optional Playwright later for dynamic pages, Codex CLI as the primary reasoning engine, and a provider interface for future OpenAI-compatible/Gemini/Groq/Ollama adapters.
 
 ---
 
@@ -56,12 +56,12 @@ Lead quality matters more than quantity. The system must demonstrate the ability
 ### In scope for MVP
 
 - Local CLI application that can run from the terminal.
-- CSV/manual seed input plus at least one public/free discovery source.
+- Apollo CSV export as the primary seed source, plus manual CSV input and at least one public/free discovery source.
 - Local SQLite cache for repeatable runs and source-grounding metadata.
 - Deterministic normalization and duplicate detection.
 - Public website/job-page/search-result enrichment.
-- AI-assisted analysis through an adapter that can use approved local workflows now.
-- Explainable scoring rubric producing 1-10 fit scores.
+- AI-assisted analysis through Codex CLI, exported/imported as strict structured JSON.
+- Hybrid status-based scoring: Codex assigns criterion statuses with evidence; code maps statuses to fixed weights and computes the 1-10 fit score.
 - `lead_list.json` and `lead_report.md` generation.
 - Evaluations runnable with `pytest` and a CLI command.
 - Example generated output for 50 evaluated leads.
@@ -79,11 +79,28 @@ Lead quality matters more than quantity. The system must demonstrate the ability
 
 ### Feasibility decisions
 
-- Use public/free data and CSV imports first; Apollo exports can be supported as an input format without requiring Apollo API access.
-- Use a provider abstraction for AI analysis. The MVP can support a `manual-json`/approved-tooling workflow and later add OpenAI-compatible API clients when production LLM access exists.
+- Use Apollo free-tier/manual exports as the first lead seed path: filter in Apollo, export CSV, then import locally. Do not require Apollo API access for MVP.
+- Use a lightweight custom state machine for MVP instead of LangGraph to reduce setup complexity; keep stage contracts clean so LangGraph can be introduced later.
+- Use Codex CLI as the primary reasoning engine. The app should export structured batch prompts/context for Codex and import validated JSON results.
+- Codex must not directly assign final numeric scores. It returns criterion statuses, evidence, pain points, opportunities, and reasoning; deterministic application code calculates final scores.
 - Store source links and evidence snippets with every lead so scores can be audited.
 - Prefer fewer, higher-confidence leads over large unverified lists.
 - Avoid violating terms of service; LinkedIn should be represented by manual/export input or user-provided public information, not brittle scraping.
+
+### Apollo usage decision
+
+Apollo is used only as the initial seed source, not as the full intelligence layer. The workflow is:
+
+1. Manually filter in Apollo for US-based companies in target verticals such as healthcare, legal, logistics, insurance, recruiting, SMB software, professional services, and growing technology companies.
+2. Use available free-tier fields such as company name, domain/website, industry, location, employee count, contact/person, role/title, and LinkedIn/company URL.
+3. Export CSV from Apollo.
+4. Import the CSV through `discover --apollo-csv path/to/export.csv`.
+5. Normalize and dedupe company/domain/contact data.
+6. Enrich from public websites, about/services/contact/careers pages, and source-grounded snippets.
+7. Send enriched evidence to Codex CLI for reasoning.
+8. Compute deterministic fit score from Codex-returned statuses and fixed weights.
+
+Apollo data is treated as baseline metadata. The final qualification still depends on source-grounded enrichment and Codex reasoning.
 
 ---
 
@@ -110,6 +127,7 @@ neodym-lead-discovery-agent/
       config.py
       models.py
       storage.py
+      state_machine.py
       discovery/
         __init__.py
         base.py
@@ -125,6 +143,7 @@ neodym-lead-discovery-agent/
         __init__.py
         base.py
         heuristic.py
+        codex_cli.py
         manual_json.py
         prompts.py
       scoring/
@@ -199,7 +218,8 @@ Required output fields:
 
 Additional recommended audit fields:
 
-- `score_breakdown`.
+- `criterion_evaluations`: Codex-returned statuses, evidence, reasons, and missing items.
+- `score_breakdown`: deterministic weighted points per criterion.
 - `confidence`.
 - `evidence`.
 - `limitations`.
@@ -207,20 +227,56 @@ Additional recommended audit fields:
 
 ---
 
-## 5. Explainable Scoring Methodology
+## 5. Hybrid Status-Based Scoring Methodology
 
-Use a 10-point rubric with sub-scores normalized into a final `fit_score`:
+We will use the same style of hybrid scoring as the previous status-based evaluation projects: the AI reasons semantically, but code owns the scoring math. Codex CLI does **not** output a final numeric score directly. Instead, Codex returns a categorical status, evidence, and short explanation for each criterion. The app validates the JSON, maps each status to a fixed multiplier, applies criterion weights, and computes the final 1-10 `fit_score`.
 
-| Factor | Weight | Signals |
+### Status multipliers
+
+```python
+STATUS_MULTIPLIERS = {
+    "missing": 0.0,
+    "very_weak": 0.15,
+    "weak": 0.30,
+    "partial": 0.50,
+    "good": 0.70,
+    "strong": 0.85,
+    "excellent": 1.00,
+}
+```
+
+### Criteria weights
+
+Total: 100 points.
+
+| Criterion ID | Weight | Codex evaluates |
 | --- | ---: | --- |
-| Industry relevance | 20% | Healthcare, legal, logistics, insurance, recruiting, professional services, SMB software, growing tech |
-| Operational complexity | 20% | Multi-step workflows, dispatch, claims, intake, support, documents, scheduling, compliance |
-| AI opportunity clarity | 25% | Clear customer support, document processing, internal copilot, knowledge retrieval, sales/CRM, or automation use case |
-| Growth/hiring/activity signals | 15% | Hiring pages, new roles, expansion language, active news/blog updates |
-| Company size / buyer fit | 10% | Large enough to pay for services but likely not fully saturated with in-house AI teams |
-| Source quality and confidence | 10% | Grounded website/source evidence, multiple corroborating links, current public data |
+| `industry_relevance` | 20 | Whether the company/vertical fits Neodym's target markets |
+| `operational_complexity` | 20 | Evidence of workflows, documents, support, dispatch, intake, compliance, or internal processes |
+| `ai_opportunity_clarity` | 25 | How clear and valuable the AI opportunity is |
+| `growth_or_activity_signals` | 15 | Hiring, expansion, active services, growth language, or current operational demand |
+| `buyer_fit` | 10 | Size/budget/decision-maker fit for Neodym services |
+| `source_grounding` | 10 | Quality, specificity, and freshness of source evidence |
 
-Scoring rules:
+### Score formula
+
+```python
+criterion_points = criterion.weight * STATUS_MULTIPLIERS[codex_status]
+raw_score_100 = sum(criterion_points for all criteria)
+fit_score_10 = round((raw_score_100 / 10), 1)
+```
+
+### Required Codex output per criterion
+
+Each criterion must include:
+
+- `id`
+- `status`: one of `missing`, `very_weak`, `weak`, `partial`, `good`, `strong`, `excellent`
+- `evidence`: source-grounded quote or short evidence summary
+- `reason`: why that status was chosen
+- `missing_items`: what would make the criterion stronger
+
+### Score bands
 
 - 9-10: Strong immediate outreach candidate with clear pain, clear AI opportunity, and strong source evidence.
 - 7-8.9: Good fit with plausible opportunity and adequate evidence.
@@ -229,13 +285,14 @@ Scoring rules:
 
 ---
 
+
 ## 6. Device Access and Automation Strategy
 
 The system cannot magically read private laptops, private Apollo accounts, LinkedIn sessions, or team machines. MVP access paths must be explicit:
 
 1. **Local CLI input:** users place CSV exports in `data/seeds/` or pass a path via CLI.
 2. **Public web fetches:** the app fetches public company websites and public pages only.
-3. **Approved AI tooling:** AI analysis runs through a pluggable adapter. Local/approved workflows are documented; production API integration is a later adapter.
+3. **Codex CLI reasoning:** the app exports source-grounded batches/prompts for Codex CLI and imports strict JSON with criterion statuses, evidence, pain points, and opportunities.
 4. **Weekly digest:** initially a local command that generates Markdown/email body. Actual email sending is optional and requires explicit SMTP/provider configuration.
 
 ---
@@ -380,9 +437,9 @@ The system cannot magically read private laptops, private Apollo accounts, Linke
 4. Keep emails only if they appear publicly in source text.
 5. Commit: `feat: identify public contact candidates`.
 
-### Task 10: Design AI analysis provider interface
+### Task 10: Design Codex reasoning interface and prompts
 
-**Objective:** Support meaningful AI reasoning while avoiding dependency on unavailable production API access.
+**Objective:** Make Codex CLI the primary reasoning engine while keeping output strict and deterministic downstream.
 
 **Files:**
 - Create: `src/neodym_lead_discovery/ai/base.py`
@@ -390,10 +447,12 @@ The system cannot magically read private laptops, private Apollo accounts, Linke
 - Create: `tests/test_ai_prompts.py`
 
 **Steps:**
-1. Define `AIAnalyzer` protocol returning structured analysis: pain point, opportunity, reason, confidence, evidence references.
-2. Create prompt templates for opportunity detection, pain-point analysis, and score reasoning.
-3. Write tests that prompts include source evidence and forbid unsupported claims.
-4. Commit: `feat: define ai analysis interface`.
+1. Define `AIAnalyzer` protocol returning structured analysis: pain point, opportunity, outreach reason, suggested contact, confidence, evidence references, and criterion statuses.
+2. Define `CriterionEvaluation` schema with `id`, `status`, `evidence`, `reason`, and `missing_items`.
+3. Create Codex prompt templates that include source evidence, require strict JSON, and explicitly forbid unsupported claims.
+4. Make prompts tell Codex to return statuses only, not final numeric fit scores.
+5. Write tests that prompts include criteria IDs, allowed statuses, source evidence, and the instruction that code calculates the score.
+6. Commit: `feat: define codex reasoning interface`.
 
 ### Task 11: Implement heuristic fallback analyzer
 
@@ -409,35 +468,41 @@ The system cannot magically read private laptops, private Apollo accounts, Linke
 3. Document this as fallback, not replacement for AI-assisted reasoning.
 4. Commit: `feat: add heuristic analysis fallback`.
 
-### Task 12: Implement manual/approved-tooling JSON analyzer
+### Task 12: Implement Codex CLI batch analyzer
 
-**Objective:** Allow analysis produced by Hermes/Codex/approved tools to be imported and validated.
+**Objective:** Export enriched lead context to Codex CLI, capture structured reasoning JSON, and validate it before scoring.
 
 **Files:**
+- Create: `src/neodym_lead_discovery/ai/codex_cli.py`
 - Create: `src/neodym_lead_discovery/ai/manual_json.py`
+- Create: `tests/test_codex_cli_analyzer.py`
 - Create: `tests/test_manual_json_analyzer.py`
 
 **Steps:**
-1. Define JSON schema for batch analysis outputs.
-2. Add CLI command to export analysis prompts for a batch of enriched companies.
-3. Add CLI command to import completed analysis JSON.
-4. Validate imported analysis against company IDs and source evidence IDs.
-5. Commit: `feat: support approved-tooling ai analysis import`.
+1. Define JSON schema for batch Codex outputs, including criterion statuses and evidence references.
+2. Add CLI command to export a batch prompt/context file for Codex, e.g. `analyze export --batch-size 10`.
+3. Add CLI command to run/import Codex output, e.g. `analyze import codex-output.json`.
+4. Validate imported analysis against company IDs, allowed statuses, required criteria, and source evidence IDs.
+5. Fail closed: invalid/missing status should block scoring until fixed or retried.
+6. Keep `manual_json.py` as a fallback/import path for approved tooling output produced outside the app.
+7. Commit: `feat: support codex cli reasoning import`.
 
-### Task 13: Implement explainable scoring rubric
+### Task 13: Implement deterministic status-to-score rubric
 
-**Objective:** Convert evidence and analysis into consistent fit scores.
+**Objective:** Convert Codex-returned criterion statuses into consistent fit scores using fixed multipliers and weights.
 
 **Files:**
 - Create: `src/neodym_lead_discovery/scoring/rubric.py`
 - Create: `tests/test_scoring.py`
 
 **Steps:**
-1. Write tests for score bands and weighted factors.
-2. Implement sub-score calculation for industry, operational complexity, opportunity clarity, growth signals, company size, and source quality.
-3. Generate score reason from top positive and negative factors.
-4. Ensure final score is clamped to 1-10.
-5. Commit: `feat: add explainable lead scoring`.
+1. Write tests for allowed statuses, multiplier mapping, criterion weights totaling 100, and score bands.
+2. Implement status multipliers: `missing=0`, `very_weak=0.15`, `weak=0.30`, `partial=0.50`, `good=0.70`, `strong=0.85`, `excellent=1.00`.
+3. Implement weighted criteria: industry relevance 20, operational complexity 20, AI opportunity clarity 25, growth/activity signals 15, buyer fit 10, source grounding 10.
+4. Calculate `raw_score_100` and `fit_score` from statuses only.
+5. Generate score reason from the strongest/weakest criterion evaluations and Codex's evidence.
+6. Ensure final score is clamped to 1-10 and rounded to one decimal.
+7. Commit: `feat: add status-based lead scoring`.
 
 ### Task 14: Generate `lead_list.json`
 
@@ -479,7 +544,7 @@ The system cannot magically read private laptops, private Apollo accounts, Linke
 **Steps:**
 1. Implement schema validation for `lead_list.json`.
 2. Implement duplicate detection across final leads.
-3. Implement scoring consistency checks: score must match rubric bands and contain a non-empty reason.
+3. Implement scoring consistency checks: final score must exactly match status multipliers × weights, include all required criteria, and contain a non-empty reason.
 4. Implement source grounding checks: every lead has at least one source link and evidence-backed reason.
 5. Add CLI: `evaluate outputs/lead_list.json`.
 6. Document commands and expected results.
@@ -496,7 +561,7 @@ The system cannot magically read private laptops, private Apollo accounts, Linke
 **Steps:**
 1. Write integration test with small local fixtures.
 2. Implement command: `run-all --csv data/seeds/sample_companies.csv --limit 50`.
-3. Pipeline order: discover -> enrich -> analyze -> score -> report -> evaluate.
+3. Pipeline order: discover -> enrich -> export Codex batch -> import/validate Codex statuses -> score -> report -> evaluate.
 4. Verify outputs are created.
 5. Commit: `feat: add end-to-end lead pipeline`.
 
@@ -511,7 +576,7 @@ The system cannot magically read private laptops, private Apollo accounts, Linke
 - Generate: `outputs/lead_report.md`
 
 **Steps:**
-1. Decide seed source: user-provided CSV, public directory list, or curated public companies.
+1. Use Apollo CSV export as preferred seed source; fallback to user-provided CSV, public directory list, or curated public companies.
 2. Run `run-all --limit 50`.
 3. Inspect top 10 manually for obvious hallucinations or bad fits.
 4. Run `evaluate` and fix failures.
@@ -565,7 +630,7 @@ The system cannot magically read private laptops, private Apollo accounts, Linke
 2. Document architecture and module responsibilities.
 3. Document data sources and their limitations.
 4. Document scoring methodology and examples.
-5. Document AI usage: tools used, prompt design, where future API integrations fit.
+5. Document AI usage: Codex CLI workflow, prompt design, JSON validation, status-based scoring, and where future API integrations fit.
 6. Document limitations: free data quality, contact availability, source freshness, no aggressive scraping.
 7. Commit: `docs: complete project documentation`.
 
@@ -602,35 +667,40 @@ The system cannot magically read private laptops, private Apollo accounts, Linke
 
 Recommended initial order:
 
-1. User-provided CSV/Apollo export input.
-2. Public company websites.
-3. Public directories that permit browsing/access.
-4. Public search results or manually curated seed lists.
-5. Public careers/job pages.
+1. **Apollo CSV export**: manually filter in Apollo free tier for US companies in target industries and export company/contact metadata. This is the main seed path.
+2. **User-provided/manual CSV**: same importer as Apollo, for leads gathered outside Apollo.
+3. **Public company websites**: homepage, about, services, contact, team, and careers pages.
+4. **Public directories/search/manual seed lists**: only where access is allowed and source links can be stored.
+5. **Optional future sources**: Google Programmable Search, DuckDuckGo/search APIs, Crunchbase public profiles, YC directory, Apify/LinkedIn only after compliance review.
 
 Avoid:
 
-- Scraping LinkedIn pages directly unless compliant and explicitly permitted.
+- Making LinkedIn/Apify scraping core to MVP.
+- Scraping sites that prohibit automated scraping.
 - Treating guessed emails as contact information.
 - Treating weak search snippets as high-confidence evidence.
+- Letting Apollo metadata alone determine lead quality; final qualification requires public-source enrichment and Codex reasoning.
 
 ---
 
 ## 10. AI Usage Strategy
 
-AI must be used for meaningful reasoning, not simple scraping. The AI layer should support:
+AI must be used for meaningful reasoning, not simple scraping. Codex CLI is the primary reasoning tool for MVP. It should analyze source-grounded company context and return strict JSON for:
 
-- Opportunity identification.
 - Pain-point detection.
-- Company analysis.
-- Score reasoning.
+- AI opportunity mapping.
+- Company fit explanation.
+- Suggested decision-maker role/person if public data supports it.
+- Criterion statuses for hybrid scoring.
+
+Codex must return statuses and evidence, not final numeric scores. Application code validates the JSON and calculates the score deterministically.
 
 Because production LLM API access is not currently available, the system should:
 
-- Export structured prompts for approved AI tooling.
-- Import validated AI-generated JSON.
-- Keep a heuristic fallback for tests/offline use.
-- Clearly mark where future OpenAI-compatible/provider integrations can be added.
+- Export structured prompts/context files for Codex CLI.
+- Import and validate Codex-generated JSON.
+- Keep a heuristic fallback for tests/offline operation only.
+- Clearly mark where future OpenAI-compatible, Gemini, Groq, Ollama, or LangGraph integrations can be added.
 
 ---
 
