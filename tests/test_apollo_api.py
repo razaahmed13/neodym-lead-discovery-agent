@@ -14,7 +14,7 @@ def test_apollo_client_posts_search_payload_and_maps_organizations():
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
-        assert request.url == "https://api.apollo.io/api/v1/mixed_companies/search"
+        assert request.url == "https://api.apollo.io/api/v1/organizations/search"
         assert request.headers["x-api-key"] == "test-key"
         assert request.headers["content-type"] == "application/json"
         payload = httpx.Request("POST", request.url, content=request.content).read()

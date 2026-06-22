@@ -7,7 +7,7 @@ import httpx
 
 from neodym_lead_discovery.models import LeadCandidate, SourceEvidence
 
-APOLLO_COMPANY_SEARCH_URL = "https://api.apollo.io/api/v1/mixed_companies/search"
+APOLLO_COMPANY_SEARCH_URL = "https://api.apollo.io/api/v1/organizations/search"
 DEFAULT_APOLLO_LOCATIONS = ["United States"]
 DEFAULT_APOLLO_INDUSTRIES = [
     "healthcare",
