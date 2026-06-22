@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Annotated
+
 import typer
 
 from neodym_lead_discovery import __version__
+from neodym_lead_discovery.discovery.csv_importer import import_csv
+from neodym_lead_discovery.storage import LeadStorage
 
 app = typer.Typer(
     help="Discover, enrich, analyze, score, report, and evaluate Neodym lead opportunities.",
@@ -30,9 +35,32 @@ def main(
 
 
 @app.command()
-def discover() -> None:
+def discover(
+    csv_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--csv",
+            "--apollo-csv",
+            exists=True,
+            readable=True,
+            help="Path to an Apollo/user CSV export to import.",
+        ),
+    ] = None,
+    db_path: Annotated[
+        Path,
+        typer.Option("--db", help="SQLite database path."),
+    ] = Path("data/lead_discovery.sqlite"),
+    source: Annotated[str, typer.Option("--source", help="Discovery source label.")] = "csv",
+) -> None:
     """Import or discover raw lead candidates."""
-    typer.echo("discover: not implemented yet")
+    if csv_path is None:
+        typer.echo("No discovery source provided. Pass --csv or --apollo-csv.", err=True)
+        raise typer.Exit(code=2)
+    storage = LeadStorage(db_path)
+    storage.initialize()
+    candidates = import_csv(csv_path, discovery_source=source)
+    imported_ids = [storage.upsert_candidate(candidate) for candidate in candidates]
+    typer.echo(f"Imported {len(imported_ids)} lead candidates into {db_path}")
 
 
 @app.command()
