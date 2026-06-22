@@ -89,12 +89,12 @@ Lead quality matters more than quantity. The system must demonstrate the ability
 
 ### Apollo usage decision
 
-Apollo is used only as the initial seed source, not as the full intelligence layer. The workflow is:
+Apollo is the first automated seed source, not the full intelligence layer. The workflow is:
 
-1. Manually filter in Apollo for US-based companies in target verticals such as healthcare, legal, logistics, insurance, recruiting, SMB software, professional services, and growing technology companies.
-2. Use available free-tier fields such as company name, domain/website, industry, location, employee count, contact/person, role/title, and LinkedIn/company URL.
-3. Export CSV from Apollo.
-4. Import the CSV through `discover --apollo-csv path/to/export.csv`.
+1. User provides `APOLLO_API_KEY` through environment variables.
+2. `lead-discovery discover --apollo-api` queries Apollo company search with default US/Neodym ICP filters, or the user can override filters with `--location`, `--industry`, and `--keyword`.
+3. The CLI imports available Apollo fields such as company name, domain/website, industry, location, employee count, description, and LinkedIn/company URL.
+4. The CLI still supports manual Apollo CSV imports through `discover --apollo-csv path/to/export.csv` as a fallback/debugging path.
 5. Normalize and dedupe company/domain/contact data.
 6. Enrich from public websites, about/services/contact/careers pages, and source-grounded snippets.
 7. Send enriched evidence to Codex CLI for reasoning.

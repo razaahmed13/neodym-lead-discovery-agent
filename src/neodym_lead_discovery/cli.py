@@ -1,11 +1,20 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Annotated
 
 import typer
 
 from neodym_lead_discovery import __version__
+from neodym_lead_discovery.discovery.apollo_api import (
+    DEFAULT_APOLLO_INDUSTRIES,
+    DEFAULT_APOLLO_KEYWORDS,
+    DEFAULT_APOLLO_LOCATIONS,
+    ApolloApiError,
+    ApolloClient,
+    discover_from_apollo,
+)
 from neodym_lead_discovery.discovery.csv_importer import import_csv
 from neodym_lead_discovery.storage import LeadStorage
 
@@ -46,19 +55,72 @@ def discover(
             help="Path to an Apollo/user CSV export to import.",
         ),
     ] = None,
+    use_apollo_api: Annotated[
+        bool,
+        typer.Option(
+            "--apollo-api",
+            help="Discover companies directly from Apollo API using APOLLO_API_KEY.",
+        ),
+    ] = False,
     db_path: Annotated[
         Path,
         typer.Option("--db", help="SQLite database path."),
     ] = Path("data/lead_discovery.sqlite"),
     source: Annotated[str, typer.Option("--source", help="Discovery source label.")] = "csv",
+    max_results: Annotated[
+        int,
+        typer.Option("--max-results", min=1, help="Maximum Apollo API companies to import."),
+    ] = 50,
+    per_page: Annotated[
+        int,
+        typer.Option("--per-page", min=1, max=100, help="Apollo API page size."),
+    ] = 25,
+    locations: Annotated[
+        list[str] | None,
+        typer.Option("--location", help="Apollo organization location filter. Repeatable."),
+    ] = None,
+    industries: Annotated[
+        list[str] | None,
+        typer.Option("--industry", help="Apollo industry/keyword tag filter. Repeatable."),
+    ] = None,
+    keywords: Annotated[
+        list[str] | None,
+        typer.Option("--keyword", help="Apollo organization keyword filter. Repeatable."),
+    ] = None,
 ) -> None:
     """Import or discover raw lead candidates."""
-    if csv_path is None:
-        typer.echo("No discovery source provided. Pass --csv or --apollo-csv.", err=True)
-        raise typer.Exit(code=2)
     storage = LeadStorage(db_path)
     storage.initialize()
-    candidates = import_csv(csv_path, discovery_source=source)
+
+    apollo_api_key = os.getenv("APOLLO_API_KEY", "").strip()
+    should_use_apollo_api = use_apollo_api or (csv_path is None and bool(apollo_api_key))
+
+    if csv_path is not None:
+        candidates = import_csv(csv_path, discovery_source=source)
+    elif should_use_apollo_api:
+        if not apollo_api_key:
+            typer.echo("APOLLO_API_KEY is required for --apollo-api discovery.", err=True)
+            raise typer.Exit(code=2)
+        try:
+            candidates = discover_from_apollo(
+                client=ApolloClient(api_key=apollo_api_key),
+                max_results=max_results,
+                per_page=per_page,
+                locations=locations or DEFAULT_APOLLO_LOCATIONS.copy(),
+                industries=industries or DEFAULT_APOLLO_INDUSTRIES.copy(),
+                keywords=keywords or DEFAULT_APOLLO_KEYWORDS.copy(),
+            )
+        except ApolloApiError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=1) from exc
+    else:
+        typer.echo(
+            "No discovery source provided. Set APOLLO_API_KEY to automate Apollo API discovery "
+            "or pass --csv/--apollo-csv for a manual import.",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
     imported_ids = [storage.upsert_candidate(candidate) for candidate in candidates]
     typer.echo(f"Imported {len(imported_ids)} lead candidates into {db_path}")
 
