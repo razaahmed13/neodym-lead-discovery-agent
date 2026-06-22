@@ -1,0 +1,39 @@
+# Neodym Lead Discovery & Qualification Agent
+
+AI-powered lead discovery and qualification system for identifying US-based companies that could benefit from Neodym's AI consulting, automation, and product development services.
+
+## Goal
+
+This project is not a generic lead scraper. It is designed to produce actionable outreach intelligence: which companies Neodym should contact, why they are a fit, what pain points likely exist, what AI opportunity Neodym could offer, and who to contact where public information is available.
+
+## Initial Scope
+
+- Discover at least 50 potential leads from free/public sources.
+- Enrich each company with website, industry, location, description, size where available, and source links.
+- Use LLM/AI-assisted reasoning for company analysis, pain-point detection, opportunity identification, and lead scoring.
+- Produce ranked outputs:
+  - `lead_list.json`
+  - `lead_report.md`
+- Include lightweight evaluation for schema validity, duplicate detection, scoring consistency, and source grounding.
+- Document AI tool usage, manual verification, limitations, and future improvements.
+
+## Planned Architecture
+
+The implementation plan in `docs/plans/2026-06-22-lead-discovery-agent.md` proposes a local-first Python CLI pipeline:
+
+1. Ingest companies from CSV exports and public/free web sources.
+2. Normalize and deduplicate lead candidates.
+3. Enrich companies from websites, search snippets, job pages, and public metadata.
+4. Run AI-assisted analysis through a provider abstraction that supports approved local/Hermes/Codex workflows now and production LLM APIs later.
+5. Score leads with an explainable rubric.
+6. Generate JSON and Markdown reports.
+7. Evaluate output quality and optionally send a weekly internal digest.
+
+## Repository Contents
+
+- `docs/extracted-specification.md` — searchable text extracted from the provided DOCX project statement.
+- `docs/plans/2026-06-22-lead-discovery-agent.md` — detailed end-to-end implementation plan.
+
+## Status
+
+Kickoff repository initialized. Implementation has not started yet.

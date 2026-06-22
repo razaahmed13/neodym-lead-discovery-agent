@@ -1,0 +1,29 @@
+# Local environment
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Generated outputs
+outputs/
+data/raw/
+data/cache/
+*.sqlite
+*.db
+
+# Local source documents / binary briefs
+*.docx
+*.pdf
+
+# OS/editor
+.DS_Store
+.idea/
+.vscode/
