@@ -15,7 +15,7 @@ _ROLE_PRIORITY = [
     "Director of Technology",
 ]
 _ROLE_PATTERN = (
-    r"(?P<name>[A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})\s*,\s*"
+    r"(?P<name>[A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})\s*(?:,|[-–—])\s*"
     r"(?P<role>Founder and CEO|Founder|CEO|CTO|Head of Operations|"
     r"VP Engineering|Director of Technology)"
     r"(?:\s*[-–—]?\s*(?P<email>[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}))?"

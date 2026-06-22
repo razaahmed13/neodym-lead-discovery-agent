@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from neodym_lead_discovery.models import LeadCandidate, QualifiedLead
+from neodym_lead_discovery.models import EnrichedCompany, LeadCandidate, QualifiedLead
 
 _COMPANY_SUFFIX_RE = re.compile(
     r"\b(incorporated|inc|llc|l\.l\.c|ltd|limited|corp|corporation|co|company)\b\.?",
@@ -82,6 +82,17 @@ class LeadStorage:
                     created_at TEXT NOT NULL,
                     FOREIGN KEY(run_id) REFERENCES runs(id)
                 );
+
+                CREATE TABLE IF NOT EXISTS enriched_companies (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    candidate_id INTEGER NOT NULL UNIQUE,
+                    company TEXT NOT NULL,
+                    website TEXT,
+                    payload_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY(candidate_id) REFERENCES candidates(id)
+                );
                 """
             )
 
@@ -133,6 +144,67 @@ class LeadStorage:
         with self._connect() as conn:
             row = conn.execute("SELECT COUNT(*) AS count FROM candidates").fetchone()
         return int(row["count"])
+
+    def list_candidates(self, limit: int | None = None) -> list[tuple[int, LeadCandidate]]:
+        query = "SELECT id, payload_json FROM candidates ORDER BY id ASC"
+        params: tuple[int, ...] = ()
+        if limit is not None:
+            query += " LIMIT ?"
+            params = (limit,)
+        with self._connect() as conn:
+            rows = conn.execute(query, params).fetchall()
+        return [
+            (int(row["id"]), LeadCandidate.model_validate_json(row["payload_json"]))
+            for row in rows
+        ]
+
+    def save_enriched_company(self, candidate_id: int, enriched: EnrichedCompany) -> int:
+        now = _now_iso()
+        payload = enriched.model_dump_json()
+        with self._connect() as conn:
+            existing = conn.execute(
+                "SELECT id FROM enriched_companies WHERE candidate_id = ?",
+                (candidate_id,),
+            ).fetchone()
+            if existing:
+                conn.execute(
+                    """
+                    UPDATE enriched_companies
+                    SET company = ?, website = ?, payload_json = ?, updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        enriched.candidate.company_name,
+                        enriched.candidate.website,
+                        payload,
+                        now,
+                        existing["id"],
+                    ),
+                )
+                return int(existing["id"])
+            cursor = conn.execute(
+                """
+                INSERT INTO enriched_companies (
+                    candidate_id, company, website, payload_json, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    candidate_id,
+                    enriched.candidate.company_name,
+                    enriched.candidate.website,
+                    payload,
+                    now,
+                    now,
+                ),
+            )
+            return int(cursor.lastrowid)
+
+    def list_enriched_companies(self) -> list[EnrichedCompany]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT payload_json FROM enriched_companies ORDER BY id ASC"
+            ).fetchall()
+        return [EnrichedCompany.model_validate_json(row["payload_json"]) for row in rows]
 
     def start_run(self, stage: str, metadata: Mapping[str, Any] | None = None) -> int:
         now = _now_iso()
