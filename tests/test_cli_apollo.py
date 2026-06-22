@@ -75,8 +75,32 @@ def test_discover_defaults_to_apollo_api_when_env_key_exists(monkeypatch, tmp_pa
     assert "Imported 0 lead candidates" in result.output
 
 
+def test_discover_reads_apollo_api_key_from_project_dotenv(monkeypatch, tmp_path):
+    calls = []
+
+    class FakeClient:
+        def __init__(self, api_key: str):
+            calls.append(api_key)
+
+    def fake_discover_from_apollo(**kwargs):
+        return []
+
+    monkeypatch.delenv("APOLLO_API_KEY", raising=False)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text('APOLLO_API_KEY="dotenv-apollo-key"\n')
+    monkeypatch.setattr("neodym_lead_discovery.cli.ApolloClient", FakeClient)
+    monkeypatch.setattr("neodym_lead_discovery.cli.discover_from_apollo", fake_discover_from_apollo)
+
+    result = runner.invoke(app, ["discover", "--db", str(tmp_path / "leads.sqlite")])
+
+    assert result.exit_code == 0
+    assert calls == ["dotenv-apollo-key"]
+    assert "Imported 0 lead candidates" in result.output
+
+
 def test_discover_without_csv_or_apollo_key_explains_how_to_automate(monkeypatch, tmp_path):
     monkeypatch.delenv("APOLLO_API_KEY", raising=False)
+    monkeypatch.chdir(tmp_path)
 
     result = runner.invoke(app, ["discover", "--db", str(tmp_path / "leads.sqlite")])
 

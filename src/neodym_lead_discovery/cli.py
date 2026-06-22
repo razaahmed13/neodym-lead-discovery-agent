@@ -25,6 +25,33 @@ app = typer.Typer(
 )
 
 
+def _env_value(name: str, dotenv_path: Path = Path(".env")) -> str:
+    """Read an env var, falling back to a local .env file without exporting secrets."""
+    value = os.getenv(name, "").strip()
+    if value:
+        return value
+    if not dotenv_path.exists():
+        return ""
+    for line in dotenv_path.read_text().splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, raw_value = stripped.split("=", 1)
+        if key.strip() != name:
+            continue
+        return _clean_dotenv_value(raw_value)
+    return ""
+
+
+def _clean_dotenv_value(raw_value: str) -> str:
+    value = raw_value.strip()
+    if " #" in value:
+        value = value.split(" #", 1)[0].strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        value = value[1:-1]
+    return value.strip()
+
+
 def _version_callback(value: bool) -> None:
     if value:
         typer.echo(f"neodym-lead-discovery-agent {__version__}")
@@ -93,7 +120,7 @@ def discover(
     storage = LeadStorage(db_path)
     storage.initialize()
 
-    apollo_api_key = os.getenv("APOLLO_API_KEY", "").strip()
+    apollo_api_key = _env_value("APOLLO_API_KEY")
     should_use_apollo_api = use_apollo_api or (csv_path is None and bool(apollo_api_key))
 
     if csv_path is not None:
