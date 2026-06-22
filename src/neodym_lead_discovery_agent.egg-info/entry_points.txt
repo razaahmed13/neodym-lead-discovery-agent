@@ -1,2 +1,0 @@
-[console_scripts]
-lead-discovery = neodym_lead_discovery.cli:app
