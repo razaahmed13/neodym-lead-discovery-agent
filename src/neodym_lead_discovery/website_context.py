@@ -312,8 +312,7 @@ def _decode_cloudflare_email(encoded: str) -> str | None:
 def _extract_visible_text_markdown(html: str) -> str:
     parser = _VisibleTextParser()
     parser.feed(html)
-    unique_lines = _dedupe_preserving_order(parser.lines)
-    return "\n".join(unique_lines).strip()
+    return "\n".join(parser.lines).strip()
 
 
 def _compact_markdown(markdown: str, max_chars: int) -> str:

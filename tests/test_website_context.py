@@ -118,6 +118,32 @@ def test_extract_main_markdown_decodes_cloudflare_protected_email() -> None:
     assert "[email" not in markdown
 
 
+def test_extract_main_markdown_preserves_repeated_career_titles() -> None:
+    html = """
+    <html><body>
+      <main>
+        <section>
+          <h2>IT</h2>
+          <article>
+            <h3>Chief Information Security Officer (CISO)</h3>
+            <p>Austin, TX / Morristown, NJ (hybrid)</p>
+          </article>
+          <article>
+            <h3>Chief Information Security Officer (CISO)</h3>
+            <p>Morristown, NJ / Austin, TX (hybrid)</p>
+          </article>
+        </section>
+      </main>
+    </body></html>
+    """
+
+    markdown = extract_main_markdown(html, url="https://example.com/careers")
+
+    assert markdown.count("Chief Information Security Officer (CISO)") == 2
+    assert "Austin, TX / Morristown, NJ (hybrid)" in markdown
+    assert "Morristown, NJ / Austin, TX (hybrid)" in markdown
+
+
 def test_discover_whitelisted_urls_uses_strict_router_from_homepage_links() -> None:
     homepage_html = """
     <html><body>
