@@ -202,7 +202,7 @@ def build_enriched_company(
         source_urls=source_links,
         llm_context={
             "pages_crawled": len(page_profiles),
-            "page_summaries": [
+            "page_evidence": [
                 {
                     "url": profile.url,
                     "page_type": profile.page_type,

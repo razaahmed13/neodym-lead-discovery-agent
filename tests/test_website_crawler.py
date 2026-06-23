@@ -86,6 +86,11 @@ def test_enrich_public_website_crawls_relevant_pages_and_builds_llm_profile():
     assert "document_processing" in enriched.structured_profile.operational_complexity_signals
     assert enriched.contact_candidates[0].email == "jane@example.com"
     assert enriched.structured_profile.llm_context["pages_crawled"] == 5
+    assert "page_evidence" in enriched.structured_profile.llm_context
+    assert "page_summaries" not in enriched.structured_profile.llm_context
+    page_evidence = enriched.structured_profile.llm_context["page_evidence"]
+    assert isinstance(page_evidence, list)
+    assert page_evidence[0]["url"] == "https://abclogistics.example"
     assert "Claims, scheduling" in enriched.structured_profile.llm_context["evidence_text"]
 
 
