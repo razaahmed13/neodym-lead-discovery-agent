@@ -5,7 +5,7 @@ from pathlib import Path
 from urllib.parse import urljoin, urlparse
 from xml.etree import ElementTree
 
-from trafilatura import extract, fetch_url
+from trafilatura import fetch_url
 
 DEFAULT_MAX_CHARS = 12_000
 WHITELISTED_PATHS = {
@@ -39,37 +39,58 @@ class _AnchorHrefParser(HTMLParser):
 
 
 class _VisibleTextParser(HTMLParser):
+    SKIPPED_TAGS = {
+        "script",
+        "style",
+        "noscript",
+        "svg",
+        "head",
+        "header",
+        "nav",
+        "footer",
+        "aside",
+    }
+    VOID_TAGS = {
+        "area",
+        "base",
+        "br",
+        "col",
+        "embed",
+        "hr",
+        "img",
+        "input",
+        "link",
+        "meta",
+        "source",
+        "track",
+        "wbr",
+    }
+
     def __init__(self) -> None:
         super().__init__()
-        self._skip_depth = 0
-        self._main_depth = 0
-        self._saw_main = False
+        self._element_stack: list[tuple[str, bool]] = []
         self.lines: list[str] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        del attrs
         normalized = tag.lower()
-        if normalized in {"script", "style", "noscript", "svg", "header", "nav", "footer"}:
-            self._skip_depth += 1
-        if normalized == "main":
-            self._saw_main = True
-            self._main_depth += 1
+        if normalized in self.VOID_TAGS:
+            return
+        should_skip = normalized in self.SKIPPED_TAGS or _has_sidebar_attribute(attrs)
+        self._element_stack.append((normalized, should_skip))
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        del tag, attrs
 
     def handle_endtag(self, tag: str) -> None:
         normalized = tag.lower()
-        if normalized == "main" and self._main_depth:
-            self._main_depth -= 1
-        if (
-            normalized in {"script", "style", "noscript", "svg", "header", "nav", "footer"}
-            and self._skip_depth
-        ):
-            self._skip_depth -= 1
+        while self._element_stack:
+            open_tag, _ = self._element_stack.pop()
+            if open_tag == normalized:
+                break
 
     def handle_data(self, data: str) -> None:
         text = " ".join(data.split())
-        if not text or self._skip_depth:
-            return
-        if self._saw_main and not self._main_depth:
+        if not text or any(should_skip for _, should_skip in self._element_stack):
             return
         self.lines.append(text)
 
@@ -79,30 +100,17 @@ def extract_main_markdown(
     url: str | None = None,
     max_chars: int = DEFAULT_MAX_CHARS,
 ) -> str:
-    """Extract the page's main body as compact Markdown using Trafilatura.
+    """Extract visible page text while skipping common layout chrome.
 
-    Trafilatura performs the stage-1 anti-boilerplate pass: it scores the DOM and removes
-    repeated navigation, footer, sidebars, cookie banners, and ads before Markdown output.
+    This intentionally avoids aggressive article/main-content pruning. The lead discovery
+    workflow needs broad business-context text from the whole page, excluding only obvious
+    non-content containers such as headers, footers, nav bars, sidebars, scripts, and styles.
     """
-    markdown = extract(
-        html,
-        url=url,
-        output_format="markdown",
-        include_comments=False,
-        include_tables=True,
-        favor_precision=True,
-        deduplicate=True,
-    )
-    fallback_markdown = _extract_visible_text_markdown(html)
-    if not markdown or not markdown.strip():
-        if fallback_markdown:
-            return _compact_markdown(fallback_markdown, max_chars=max_chars)
-        raise WebsiteContextError("Trafilatura could not extract useful main-body content.")
-
-    compact = _compact_markdown(markdown, max_chars=max_chars)
-    if _should_use_visible_text_fallback(compact, fallback_markdown):
-        return _compact_markdown(fallback_markdown, max_chars=max_chars)
-    return compact
+    del url
+    markdown = _extract_visible_text_markdown(html)
+    if not markdown:
+        raise WebsiteContextError("Could not extract useful visible text from HTML.")
+    return _compact_markdown(markdown, max_chars=max_chars)
 
 
 def discover_whitelisted_urls(url: str, fetcher=None) -> list[str]:
@@ -234,21 +242,21 @@ def _dedupe_key(url: str) -> str:
     return f"{parsed.scheme}://{parsed.netloc.lower()}{path}"
 
 
+def _has_sidebar_attribute(attrs: list[tuple[str, str | None]]) -> bool:
+    for name, value in attrs:
+        if not value or name.lower() not in {"class", "id", "role", "aria-label"}:
+            continue
+        normalized = value.lower()
+        if "sidebar" in normalized or "side-bar" in normalized:
+            return True
+    return False
+
+
 def _extract_visible_text_markdown(html: str) -> str:
     parser = _VisibleTextParser()
     parser.feed(html)
     unique_lines = _dedupe_preserving_order(parser.lines)
     return "\n".join(unique_lines).strip()
-
-
-def _should_use_visible_text_fallback(markdown: str, fallback_markdown: str) -> bool:
-    markdown_words = _word_count(markdown)
-    fallback_words = _word_count(fallback_markdown)
-    return markdown_words < 25 and fallback_words >= markdown_words + 15
-
-
-def _word_count(text: str) -> int:
-    return len(text.split())
 
 
 def _compact_markdown(markdown: str, max_chars: int) -> str:

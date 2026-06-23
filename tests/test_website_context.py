@@ -2,7 +2,6 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
-from neodym_lead_discovery import website_context
 from neodym_lead_discovery.cli import app
 from neodym_lead_discovery.website_context import discover_whitelisted_urls, extract_main_markdown
 
@@ -41,9 +40,37 @@ def test_extract_main_markdown_prunes_navigation_footer_and_cookie_boilerplate()
     assert "Accept all cookies" not in markdown
 
 
-def test_extract_main_markdown_falls_back_when_trafilatura_drops_contact_details(
-    monkeypatch,
-) -> None:
+def test_extract_main_markdown_keeps_whole_page_text_except_layout_chrome() -> None:
+    html = """
+    <html><body>
+      <header>Top navigation and login</header>
+      <main>
+        <h1>Primary product page</h1>
+        <p>Core product description from main content.</p>
+      </main>
+      <aside>Related article sidebar should be removed.</aside>
+      <div class="right-sidebar">Newsletter signup sidebar should be removed.</div>
+      <section>
+        <h2>FAQ outside main</h2>
+        <p>Important page details that simple visible-text extraction should keep.</p>
+      </section>
+      <footer>Privacy Policy Terms and Conditions</footer>
+    </body></html>
+    """
+
+    markdown = extract_main_markdown(html, url="https://example.com/product")
+
+    assert "Primary product page" in markdown
+    assert "Core product description" in markdown
+    assert "FAQ outside main" in markdown
+    assert "Important page details" in markdown
+    assert "Top navigation" not in markdown
+    assert "Related article sidebar" not in markdown
+    assert "Newsletter signup sidebar" not in markdown
+    assert "Privacy Policy" not in markdown
+
+
+def test_extract_main_markdown_keeps_contact_details_from_simple_visible_text() -> None:
     html = """
     <html><body>
       <header><nav>Resources Blog FAQ Careers Claims Log In</nav></header>
@@ -59,12 +86,6 @@ def test_extract_main_markdown_falls_back_when_trafilatura_drops_contact_details
       <footer>Privacy Policy Terms and Conditions Copyright 2026</footer>
     </body></html>
     """
-
-    monkeypatch.setattr(
-        website_context,
-        "extract",
-        lambda *args, **kwargs: "# Contact us\n\nSupport\n\nAgents",
-    )
 
     markdown = extract_main_markdown(html, url="https://example.com/contact-us")
 
@@ -173,7 +194,7 @@ def test_fetch_website_command_writes_multiple_whitelisted_pages(
     )
 
     assert result.exit_code == 0, result.output
-    assert "Wrote pruned website context from 3 page(s)" in result.output
+    assert "Wrote website context from 3 page(s)" in result.output
     markdown = output_path.read_text()
     assert markdown.startswith("# Website context")
     assert "## Source: https://example.com/" in markdown

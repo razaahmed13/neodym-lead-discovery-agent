@@ -190,7 +190,7 @@ def fetch_website(
         typer.Option(
             "--output",
             "-o",
-            help="Markdown file where the pruned website context will be written.",
+            help="Markdown file where the extracted website context will be written.",
         ),
     ],
     max_chars: Annotated[
@@ -198,7 +198,7 @@ def fetch_website(
         typer.Option(
             "--max-chars",
             min=500,
-            help="Maximum characters to keep from the extracted main-body Markdown.",
+            help="Maximum characters to keep from the extracted visible page text.",
         ),
     ] = DEFAULT_MAX_CHARS,
     reader_output_path: Annotated[
@@ -213,7 +213,7 @@ def fetch_website(
         typer.Option("--reader-model", help="Gemini model for the Reader extraction step."),
     ] = DEFAULT_READER_MODEL,
 ) -> None:
-    """Fetch one website and write short, anti-boilerplate Markdown context."""
+    """Fetch one website and write visible-text Markdown context."""
     try:
         written_path, page_count = write_website_context(
             url=url,
@@ -223,7 +223,7 @@ def fetch_website(
     except WebsiteContextError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
-    typer.echo(f"Wrote pruned website context from {page_count} page(s) to {written_path}")
+    typer.echo(f"Wrote website context from {page_count} page(s) to {written_path}")
 
     if reader_output_path is None:
         return
