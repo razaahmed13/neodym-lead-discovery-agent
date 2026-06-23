@@ -66,7 +66,7 @@ def test_storage_saves_structured_website_facts_without_raw_content(tmp_path):
     assert saved is not None
     assert saved["candidate_id"] == candidate_id
     assert saved["company_name"] == "SmartTalent"
-    assert saved["location"] == "Washington"
+    assert "location" not in saved
     assert saved["industry"] == "Staffing"
     assert saved["website"] == "https://smarttalentstaffing.com/"
     assert saved["page_count"] == 4
@@ -84,6 +84,7 @@ def test_storage_saves_structured_website_facts_without_raw_content(tmp_path):
     row_keys = set(row.keys())
     assert "raw_content" not in row_keys
     assert "context" not in row_keys
+    assert "location" not in row_keys
 
 
 def test_storage_persists_qualified_lead_with_run_state(tmp_path):

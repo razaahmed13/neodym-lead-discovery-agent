@@ -77,7 +77,6 @@ class LeadStorage:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     candidate_id INTEGER NOT NULL UNIQUE,
                     company_name TEXT NOT NULL,
-                    location TEXT,
                     industry TEXT,
                     website TEXT,
                     page_count INTEGER NOT NULL CHECK(page_count >= 0),
@@ -184,13 +183,12 @@ class LeadStorage:
             conn.execute(
                 """
                 INSERT INTO candidate_website_facts (
-                    candidate_id, company_name, location, industry, website,
+                    candidate_id, company_name, industry, website,
                     page_count, facts_json, created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(candidate_id) DO UPDATE SET
                     company_name = excluded.company_name,
-                    location = excluded.location,
                     industry = excluded.industry,
                     website = excluded.website,
                     page_count = excluded.page_count,
@@ -200,7 +198,6 @@ class LeadStorage:
                 (
                     candidate_id,
                     candidate.company_name,
-                    candidate.location,
                     candidate.industry,
                     candidate.website,
                     page_count,
@@ -219,7 +216,7 @@ class LeadStorage:
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT id, candidate_id, company_name, location, industry, website,
+                SELECT id, candidate_id, company_name, industry, website,
                        page_count, facts_json, created_at, updated_at
                 FROM candidate_website_facts
                 WHERE candidate_id = ?
@@ -232,7 +229,6 @@ class LeadStorage:
             "id": int(row["id"]),
             "candidate_id": int(row["candidate_id"]),
             "company_name": row["company_name"],
-            "location": row["location"],
             "industry": row["industry"],
             "website": row["website"],
             "page_count": int(row["page_count"]),
