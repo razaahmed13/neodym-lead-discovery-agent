@@ -127,23 +127,26 @@ def parse_reader_json(response_text: str) -> dict[str, Any]:
 
 def _call_gemini(prompt: str, api_key: str, model: str) -> str:
     endpoint = GEMINI_ENDPOINT_TEMPLATE.format(model=model)
-    response = httpx.post(
-        endpoint,
-        params={"key": api_key},
-        json={
-            "contents": [
-                {
-                    "role": "user",
-                    "parts": [{"text": prompt}],
-                }
-            ],
-            "generationConfig": {
-                "temperature": 0,
-                "responseMimeType": "application/json",
+    try:
+        response = httpx.post(
+            endpoint,
+            params={"key": api_key},
+            json={
+                "contents": [
+                    {
+                        "role": "user",
+                        "parts": [{"text": prompt}],
+                    }
+                ],
+                "generationConfig": {
+                    "temperature": 0,
+                    "responseMimeType": "application/json",
+                },
             },
-        },
-        timeout=60,
-    )
+            timeout=60,
+        )
+    except httpx.RequestError as exc:
+        raise ReaderError(f"Gemini Reader request failed: {exc.__class__.__name__}") from exc
     try:
         response.raise_for_status()
     except httpx.HTTPStatusError as exc:

@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from time import sleep
 from typing import Annotated
 
 import typer
@@ -40,6 +41,9 @@ app = typer.Typer(
 )
 
 DEFAULT_DB_PATH = Path("data/lead_discovery.sqlite")
+DEFAULT_READER_DELAY_SECONDS = 5.0
+DEFAULT_READER_RETRIES = 3
+DEFAULT_READER_RETRY_DELAY_SECONDS = 60.0
 
 
 def _env_value(name: str, dotenv_path: Path = Path(".env")) -> str:
@@ -211,6 +215,30 @@ def enrich_websites(
         str,
         typer.Option("--reader-model", help="Gemini model for the Reader extraction step."),
     ] = DEFAULT_READER_MODEL,
+    reader_delay_seconds: Annotated[
+        float,
+        typer.Option(
+            "--reader-delay-seconds",
+            min=0,
+            help="Seconds to pause between Gemini Reader calls to avoid free-tier rate limits.",
+        ),
+    ] = DEFAULT_READER_DELAY_SECONDS,
+    reader_retries: Annotated[
+        int,
+        typer.Option(
+            "--reader-retries",
+            min=0,
+            help="Retry count for transient Gemini Reader failures such as HTTP 429.",
+        ),
+    ] = DEFAULT_READER_RETRIES,
+    reader_retry_delay_seconds: Annotated[
+        float,
+        typer.Option(
+            "--reader-retry-delay-seconds",
+            min=0,
+            help="Seconds to wait before retrying transient Gemini Reader failures.",
+        ),
+    ] = DEFAULT_READER_RETRY_DELAY_SECONDS,
 ) -> None:
     """Fetch candidate websites, run Reader extraction, and save structured facts only."""
     gemini_api_key = _env_value("GEMINI_API_KEY")
@@ -223,12 +251,21 @@ def enrich_websites(
 
     storage = LeadStorage(db_path)
     storage.initialize()
-    run_id = storage.start_run(stage="enrich_websites", metadata={"limit": limit})
+    run_id = storage.start_run(
+        stage="enrich_websites",
+        metadata={
+            "limit": limit,
+            "reader_delay_seconds": reader_delay_seconds,
+            "reader_retries": reader_retries,
+            "reader_retry_delay_seconds": reader_retry_delay_seconds,
+        },
+    )
     enriched_count = 0
     skipped_count = 0
     failed_count = 0
+    candidate_rows = storage.list_candidates(limit=limit)
 
-    for candidate_id, candidate in storage.list_candidates(limit=limit):
+    for index, (candidate_id, candidate) in enumerate(candidate_rows):
         if not candidate.website:
             skipped_count += 1
             continue
@@ -238,10 +275,12 @@ def enrich_websites(
                 candidate.website,
                 max_chars=max_chars,
             )
-            reader_facts = extract_reader_facts(
+            reader_facts = _extract_reader_facts_with_retries(
                 website_context,
                 api_key=gemini_api_key,
                 model=reader_model,
+                retries=reader_retries,
+                retry_delay_seconds=reader_retry_delay_seconds,
             )
             storage.save_candidate_website_facts(
                 candidate_id=candidate_id,
@@ -253,6 +292,8 @@ def enrich_websites(
         except (WebsiteContextError, ReaderError) as exc:
             failed_count += 1
             typer.echo(f"Failed to enrich {candidate.company_name}: {exc}", err=True)
+        if reader_delay_seconds > 0 and index < len(candidate_rows) - 1:
+            sleep(reader_delay_seconds)
 
     status = "completed" if failed_count == 0 else "completed_with_errors"
     storage.finish_run(
@@ -268,6 +309,46 @@ def enrich_websites(
         f"Enriched {enriched_count} candidate website(s); "
         f"skipped {skipped_count}; failed {failed_count}."
     )
+
+
+def _extract_reader_facts_with_retries(
+    website_context: str,
+    *,
+    api_key: str,
+    model: str,
+    retries: int,
+    retry_delay_seconds: float,
+) -> dict[str, object]:
+    attempt = 0
+    while True:
+        try:
+            return extract_reader_facts(website_context, api_key=api_key, model=model)
+        except ReaderError as exc:
+            if attempt >= retries or not _is_retryable_reader_error(exc):
+                raise
+            attempt += 1
+            typer.echo(
+                f"Reader hit a transient Gemini error; retrying in "
+                f"{retry_delay_seconds:g}s ({attempt}/{retries}).",
+                err=True,
+            )
+            if retry_delay_seconds > 0:
+                sleep(retry_delay_seconds)
+
+
+def _is_retryable_reader_error(exc: ReaderError) -> bool:
+    message = str(exc).lower()
+    retryable_markers = (
+        "http 429",
+        "http 500",
+        "http 502",
+        "http 503",
+        "http 504",
+        "rate limit",
+        "timeout",
+        "temporarily unavailable",
+    )
+    return any(marker in message for marker in retryable_markers)
 
 
 @app.command("fetch-website")
