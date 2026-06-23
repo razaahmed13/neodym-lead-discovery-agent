@@ -12,7 +12,7 @@ from neodym_lead_discovery.models import (
     StructuredCompanyProfile,
 )
 from neodym_lead_discovery.storage import LeadStorage
-from neodym_lead_discovery.ui import load_dashboard_data
+from neodym_lead_discovery.ui import load_dashboard_data, render_dashboard_html
 
 runner = CliRunner()
 
@@ -100,3 +100,53 @@ def test_ui_command_launches_streamlit_with_project_dashboard(tmp_path: Path, mo
     assert isinstance(env, dict)
     assert env["LEAD_DISCOVERY_DB"] == str(db_path)
     assert calls[0]["check"] is True
+
+
+def test_dashboard_sidebar_lists_candidates_and_selects_one_enriched_company(tmp_path: Path):
+    db_path = tmp_path / "lead_discovery.sqlite"
+    storage = LeadStorage(db_path)
+    storage.initialize()
+    first_candidate_id = storage.upsert_candidate(
+        LeadCandidate(company_name="ABC Logistics", website="https://abc.example")
+    )
+    second_candidate_id = storage.upsert_candidate(
+        LeadCandidate(company_name="Clearview Health", website="https://clearview.example")
+    )
+    storage.save_enriched_company(
+        first_candidate_id,
+        EnrichedCompany(
+            candidate=LeadCandidate(company_name="ABC Logistics", website="https://abc.example"),
+            structured_profile=StructuredCompanyProfile(
+                company_name="ABC Logistics",
+                website="https://abc.example",
+                summary="Logistics summary",
+            ),
+        ),
+    )
+    storage.save_enriched_company(
+        second_candidate_id,
+        EnrichedCompany(
+            candidate=LeadCandidate(
+                company_name="Clearview Health", website="https://clearview.example"
+            ),
+            structured_profile=StructuredCompanyProfile(
+                company_name="Clearview Health",
+                website="https://clearview.example",
+                summary="Healthcare summary",
+            ),
+        ),
+    )
+
+    html = render_dashboard_html(db_path)
+
+    assert '<aside class="sidebar"' in html
+    assert "Candidates" in html
+    assert "Enriched companies" in html
+    assert "ABC Logistics" in html
+    assert "Clearview Health" in html
+    assert 'class="enriched-selector active"' in html
+    assert 'data-select-company="company-0"' in html
+    assert 'data-select-company="company-1"' in html
+    assert 'data-company-card="company-0"' in html
+    assert 'data-company-card="company-1"' in html
+    assert "selectCompany" in html

@@ -63,6 +63,20 @@ def render_dashboard_html(db_path: str | Path) -> str:
   <style>{_CSS}</style>
 </head>
 <body>
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <p class="eyebrow">Navigation</p>
+      <strong>Lead workspace</strong>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">Candidates <span>{len(candidates)}</span></div>
+      {_sidebar_candidates(candidates)}
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">Enriched companies <span>{len(enriched)}</span></div>
+      {_sidebar_enriched(enriched)}
+    </div>
+  </aside>
   <main class="shell">
     <section class="hero">
       <div>
@@ -113,6 +127,20 @@ def render_dashboard_html(db_path: str | Path) -> str:
         node.style.display = node.dataset.filter.includes(q) ? '' : 'none';
       }});
     }});
+    function selectCompany(companyId) {{
+      document.querySelectorAll('[data-company-card]').forEach((node) => {{
+        node.classList.toggle('selected-company', node.dataset.companyCard === companyId);
+        node.classList.toggle('hidden-company', node.dataset.companyCard !== companyId);
+      }});
+      document.querySelectorAll('[data-select-company]').forEach((node) => {{
+        node.classList.toggle('active', node.dataset.selectCompany === companyId);
+      }});
+    }}
+    document.querySelectorAll('[data-select-company]').forEach((node) => {{
+      node.addEventListener('click', () => selectCompany(node.dataset.selectCompany));
+    }});
+    const firstCompany = document.querySelector('[data-select-company]');
+    if (firstCompany) selectCompany(firstCompany.dataset.selectCompany);
   </script>
 </body>
 </html>"""
@@ -233,20 +261,53 @@ def _candidate_table(rows: list[dict[str, str]]) -> str:
 <tbody>{body}</tbody></table></div>"""
 
 
+def _sidebar_candidates(rows: list[dict[str, str]]) -> str:
+    if not rows:
+        return "<p class='sidebar-empty'>No candidates yet</p>"
+    return "".join(
+        "<a class='sidebar-link' href='#candidates' data-filter='{filter_text}'>"
+        "<strong>{company}</strong><span>{status} · {industry}</span></a>".format(
+            filter_text=_escape(_filter_text(row)),
+            company=_escape(row["company"]),
+            status=_escape(row["status"]),
+            industry=_escape(row["industry"]),
+        )
+        for row in rows
+    )
+
+
+def _sidebar_enriched(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return "<p class='sidebar-empty'>No enriched companies yet</p>"
+    return "".join(
+        "<button type='button' class=\"enriched-selector{active}\" "
+        "data-select-company=\"company-{index}\" data-filter='{filter_text}'>"
+        "<strong>{company}</strong><span>{opportunities} opportunities</span></button>".format(
+            active=" active" if index == 0 else "",
+            index=index,
+            filter_text=_escape(_filter_text(row)),
+            company=_escape(row["company"]),
+            opportunities=_escape(str(len(row["automation_opportunities"]))),
+        )
+        for index, row in enumerate(rows)
+    )
+
+
 def _company_cards(rows: list[dict[str, Any]]) -> str:
     if not rows:
         return "<p class='empty'>No enriched companies yet. Run enrichment first.</p>"
-    return "".join(_company_card(row) for row in rows)
+    return "".join(_company_card(row, index=index) for index, row in enumerate(rows))
 
 
-def _company_card(row: dict[str, Any]) -> str:
+def _company_card(row: dict[str, Any], *, index: int) -> str:
     opportunities = _list_items(row["automation_opportunities"][:8])
     manual = _list_items(row["manual_process_signals"][:8])
     limitations = _list_items(row["limitations"][:6])
     services = _chips(row["services_or_products"][:10])
     signals = _chips(row["operational_signals"])
     pages = "".join(_page_evidence_card(page) for page in row["page_evidence"] if isinstance(page, dict))
-    return f"""<article class="company-card" data-filter="{_escape(_filter_text(row))}">
+    visibility_class = " selected-company" if index == 0 else " hidden-company"
+    return f"""<article class="company-card{visibility_class}" data-company-card="company-{index}" data-filter="{_escape(_filter_text(row))}">
   <div class="company-top">
     <div><h3>{_escape(row['company'])}</h3><p>{_link(row['website'])}</p></div>
     <span class="badge">{_escape(str(row['pages_crawled']))} pages</span>
@@ -322,7 +383,18 @@ _CSS = """
 * { box-sizing: border-box; }
 body { margin: 0; background: radial-gradient(circle at 8% 0%, #22304a 0, #0b0f16 34%, #050609 100%); color: #edf2ff; }
 a { color: #9db7ff; text-decoration: none; }
-.shell { width: min(1180px, calc(100% - 40px)); margin: 0 auto; padding: 42px 0 80px; }
+.sidebar { position: fixed; inset: 0 auto 0 0; width: 300px; padding: 24px 18px; overflow-y: auto; border-right: 1px solid rgba(255,255,255,.09); background: rgba(4,7,12,.72); backdrop-filter: blur(20px); }
+.sidebar-brand { margin-bottom: 24px; }
+.sidebar-brand strong { display: block; font-size: 20px; letter-spacing: -.03em; }
+.sidebar-section { margin: 22px 0; }
+.sidebar-title { display: flex; align-items: center; justify-content: space-between; color: #dce5ff; font-size: 12px; text-transform: uppercase; letter-spacing: .14em; margin-bottom: 10px; }
+.sidebar-title span { color: #7f91ff; }
+.sidebar-link, .enriched-selector { display: block; width: 100%; margin: 8px 0; padding: 12px 12px; border-radius: 16px; border: 1px solid rgba(255,255,255,.08); background: rgba(255,255,255,.035); color: #e8edff; text-align: left; cursor: pointer; }
+.sidebar-link strong, .enriched-selector strong { display: block; font-size: 14px; }
+.sidebar-link span, .enriched-selector span, .sidebar-empty { display: block; margin-top: 4px; color: #98a2b8; font-size: 12px; }
+.enriched-selector.active { border-color: rgba(127,145,255,.78); background: linear-gradient(135deg, rgba(127,145,255,.22), rgba(255,255,255,.045)); box-shadow: 0 10px 30px rgba(0,0,0,.22); }
+.hidden-company { display: none; }
+.shell { width: min(1180px, calc(100% - 360px)); margin: 0 32px 0 332px; padding: 42px 0 80px; }
 .hero { display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; margin-bottom: 24px; }
 .eyebrow { color: #7f91ff; font-size: 12px; text-transform: uppercase; letter-spacing: .18em; margin: 0 0 8px; }
 h1 { font-size: clamp(36px, 6vw, 72px); line-height: .9; margin: 0 0 16px; letter-spacing: -.06em; }
@@ -355,7 +427,7 @@ summary { cursor: pointer; color: #b9c7ff; font-weight: 650; }
 .page-card { margin: 12px 0; padding: 14px; border: 1px solid rgba(255,255,255,.08); background: rgba(255,255,255,.04); border-radius: 16px; }
 blockquote { margin: 10px 0 0; padding-left: 12px; border-left: 3px solid #7285ff; color: #aeb8cd; }
 .empty { color: #98a2b8; padding: 18px; border: 1px dashed rgba(255,255,255,.16); border-radius: 16px; }
-@media (max-width: 860px) { .hero, .section-heading, .company-top { flex-direction: column; } .metrics, .grid-two { grid-template-columns: 1fr; } }
+@media (max-width: 860px) { .sidebar { position: static; width: auto; border-right: 0; border-bottom: 1px solid rgba(255,255,255,.09); } .shell { width: min(100% - 32px, 1180px); margin: 0 auto; } .hero, .section-heading, .company-top { flex-direction: column; } .metrics, .grid-two { grid-template-columns: 1fr; } }
 """
 
 
