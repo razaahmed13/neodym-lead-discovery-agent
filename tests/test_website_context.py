@@ -3,7 +3,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from neodym_lead_discovery.cli import app
-from neodym_lead_discovery.website_context import extract_main_markdown
+from neodym_lead_discovery.website_context import discover_whitelisted_urls, extract_main_markdown
 
 HTML_WITH_BOILERPLATE = """
 <html>
@@ -40,14 +40,89 @@ def test_extract_main_markdown_prunes_navigation_footer_and_cookie_boilerplate()
     assert "Accept all cookies" not in markdown
 
 
-def test_fetch_website_command_writes_short_llm_ready_markdown_file(
-    tmp_path: Path, monkeypatch
+def test_discover_whitelisted_urls_uses_strict_router_from_homepage_links() -> None:
+    homepage_html = """
+    <html><body>
+      <a href="/about">About</a>
+      <a href="/services/">Services</a>
+      <a href="/solutions?ref=nav">Solutions</a>
+      <a href="/what-we-do">What we do</a>
+      <a href="/contact#form">Contact</a>
+      <a href="/blog">Blog</a>
+      <a href="/articles/how-to-automate">Article</a>
+      <a href="https://other.example/about">External About</a>
+    </body></html>
+    """
+
+    def fake_fetch_url(url: str) -> str | None:
+        assert url in {"https://example.com", "https://example.com/sitemap.xml"}
+        if url.endswith("sitemap.xml"):
+            return None
+        return homepage_html
+
+    urls = discover_whitelisted_urls("https://example.com", fetcher=fake_fetch_url)
+
+    assert urls == [
+        "https://example.com/",
+        "https://example.com/about",
+        "https://example.com/services/",
+        "https://example.com/solutions?ref=nav",
+        "https://example.com/what-we-do",
+        "https://example.com/contact#form",
+    ]
+
+
+def test_discover_whitelisted_urls_prefers_sitemap_when_available() -> None:
+    sitemap_xml = """
+    <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+      <url><loc>https://example.com/about</loc></url>
+      <url><loc>https://example.com/blog</loc></url>
+      <url><loc>https://example.com/contact</loc></url>
+      <url><loc>https://other.example/services</loc></url>
+    </urlset>
+    """
+
+    def fake_fetch_url(url: str) -> str | None:
+        assert url == "https://example.com/sitemap.xml"
+        return sitemap_xml
+
+    urls = discover_whitelisted_urls("https://example.com", fetcher=fake_fetch_url)
+
+    assert urls == [
+        "https://example.com/",
+        "https://example.com/about",
+        "https://example.com/contact",
+    ]
+
+
+def test_fetch_website_command_writes_multiple_whitelisted_pages(
+    tmp_path: Path,
+    monkeypatch,
 ) -> None:
     output_path = tmp_path / "example-context.md"
 
-    def fake_fetch_url(url: str) -> str:
-        assert url == "https://example.com"
-        return HTML_WITH_BOILERPLATE
+    about_html = HTML_WITH_BOILERPLATE.replace(
+        "Automating invoice processing for small manufacturers",
+        "About Example Automation Agency",
+    )
+    services_html = HTML_WITH_BOILERPLATE.replace(
+        "Automating invoice processing for small manufacturers",
+        "Services for operations teams",
+    )
+    pages = {
+        "https://example.com/sitemap.xml": None,
+        "https://example.com": (
+            '<a href="/about">About</a>'
+            '<a href="/services">Services</a>'
+            '<a href="/blog">Blog</a>'
+        ),
+        "https://example.com/": HTML_WITH_BOILERPLATE,
+        "https://example.com/about": about_html,
+        "https://example.com/services": services_html,
+    }
+
+    def fake_fetch_url(url: str) -> str | None:
+        return pages[url]
 
     monkeypatch.setattr("neodym_lead_discovery.website_context.fetch_url", fake_fetch_url)
 
@@ -57,10 +132,14 @@ def test_fetch_website_command_writes_short_llm_ready_markdown_file(
     )
 
     assert result.exit_code == 0, result.output
-    assert "Wrote pruned website context" in result.output
+    assert "Wrote pruned website context from 3 page(s)" in result.output
     markdown = output_path.read_text()
     assert markdown.startswith("# Website context")
-    assert "Source URL: https://example.com" in markdown
-    assert "Automating invoice processing" in markdown
+    assert "## Source: https://example.com/" in markdown
+    assert "## Source: https://example.com/about" in markdown
+    assert "## Source: https://example.com/services" in markdown
+    assert "About Example Automation Agency" in markdown
+    assert "Services for operations teams" in markdown
+    assert "blog" not in markdown.lower()
     assert "Terms of Service" not in markdown
     assert "Privacy Policy" not in markdown

@@ -198,11 +198,15 @@ def fetch_website(
 ) -> None:
     """Fetch one website and write short, anti-boilerplate Markdown context."""
     try:
-        written_path = write_website_context(url=url, output_path=output_path, max_chars=max_chars)
+        written_path, page_count = write_website_context(
+            url=url,
+            output_path=output_path,
+            max_chars=max_chars,
+        )
     except WebsiteContextError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
-    typer.echo(f"Wrote pruned website context to {written_path}")
+    typer.echo(f"Wrote pruned website context from {page_count} page(s) to {written_path}")
 
 
 @app.command()
