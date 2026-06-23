@@ -96,6 +96,28 @@ def test_extract_main_markdown_keeps_contact_details_from_simple_visible_text() 
     assert "Privacy Policy" not in markdown
 
 
+def test_extract_main_markdown_decodes_cloudflare_protected_email() -> None:
+    html = """
+    <html><body>
+      <main>
+        <p>Email us at
+          <a href="/cdn-cgi/l/email-protection#ddaea8adadb2afa99db5b4adadb2f3beb2b0">
+            <span
+              class="__cf_email__"
+              data-cfemail="8af9fffafae5f8fecae2e3fafae5a4e9e5e7"
+            >[email&#160;protected]</span>
+          </a>
+        </p>
+      </main>
+    </body></html>
+    """
+
+    markdown = extract_main_markdown(html, url="https://example.com/contact-us")
+
+    assert "support@hippo.com" in markdown
+    assert "[email" not in markdown
+
+
 def test_discover_whitelisted_urls_uses_strict_router_from_homepage_links() -> None:
     homepage_html = """
     <html><body>

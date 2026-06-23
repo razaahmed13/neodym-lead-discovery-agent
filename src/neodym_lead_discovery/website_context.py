@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from html.parser import HTMLParser
 from pathlib import Path
-from urllib.parse import urljoin, urlparse
+from urllib.parse import unquote, urljoin, urlparse
 from xml.etree import ElementTree
 
 from trafilatura import fetch_url
@@ -75,8 +75,16 @@ class _VisibleTextParser(HTMLParser):
         normalized = tag.lower()
         if normalized in self.VOID_TAGS:
             return
-        should_skip = normalized in self.SKIPPED_TAGS or _has_sidebar_attribute(attrs)
+        attr_map = {name.lower(): value or "" for name, value in attrs}
+        decoded_email = _extract_email_from_attrs(attr_map)
+        should_skip = (
+            normalized in self.SKIPPED_TAGS
+            or _has_sidebar_attribute(attrs)
+            or decoded_email is not None
+        )
         self._element_stack.append((normalized, should_skip))
+        if decoded_email:
+            self.lines.append(decoded_email)
 
     def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         del tag, attrs
@@ -250,6 +258,29 @@ def _has_sidebar_attribute(attrs: list[tuple[str, str | None]]) -> bool:
         if "sidebar" in normalized or "side-bar" in normalized:
             return True
     return False
+
+
+def _extract_email_from_attrs(attrs: dict[str, str]) -> str | None:
+    href = attrs.get("href", "")
+    if href.lower().startswith("mailto:"):
+        return unquote(href.split(":", 1)[1].split("?", 1)[0]).strip() or None
+
+    cf_email = attrs.get("data-cfemail", "")
+    if cf_email:
+        return _decode_cloudflare_email(cf_email)
+
+    return None
+
+
+def _decode_cloudflare_email(encoded: str) -> str | None:
+    try:
+        key = int(encoded[:2], 16)
+        decoded = "".join(
+            chr(int(encoded[index : index + 2], 16) ^ key) for index in range(2, len(encoded), 2)
+        )
+    except ValueError:
+        return None
+    return decoded if "@" in decoded else None
 
 
 def _extract_visible_text_markdown(html: str) -> str:
