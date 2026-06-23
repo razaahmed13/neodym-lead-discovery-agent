@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import Annotated
 
@@ -240,6 +242,39 @@ def evaluate() -> None:
 def digest() -> None:
     """Render the weekly top-lead digest."""
     typer.echo("digest: not implemented yet")
+
+
+@app.command()
+def ui(
+    db_path: Annotated[
+        Path,
+        typer.Option(
+            "--db",
+            help="SQLite database path to inspect in the local UI.",
+        ),
+    ] = DEFAULT_DB_PATH,
+    port: Annotated[
+        int,
+        typer.Option("--port", min=1, max=65535, help="Local UI server port."),
+    ] = 8501,
+) -> None:
+    """Launch the local dashboard for candidates and enriched companies."""
+    env = os.environ.copy()
+    env["LEAD_DISCOVERY_DB"] = str(db_path)
+    typer.echo(f"Starting Lead Discovery UI for {db_path} on http://localhost:{port}")
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "neodym_lead_discovery.ui",
+            "--db",
+            str(db_path),
+            "--port",
+            str(port),
+        ],
+        env=env,
+        check=True,
+    )
 
 
 @app.command("run-all")
