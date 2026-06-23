@@ -21,6 +21,11 @@ from neodym_lead_discovery.discovery.apollo_api import (
 )
 from neodym_lead_discovery.discovery.csv_importer import import_csv
 from neodym_lead_discovery.storage import LeadStorage
+from neodym_lead_discovery.website_context import (
+    DEFAULT_MAX_CHARS,
+    WebsiteContextError,
+    write_website_context,
+)
 
 app = typer.Typer(
     help="Discover, analyze, score, report, and evaluate Neodym lead opportunities.",
@@ -169,6 +174,35 @@ def discover(
 
     imported_ids = [storage.upsert_candidate(candidate) for candidate in candidates]
     typer.echo(f"Imported {len(imported_ids)} lead candidates into {db_path}")
+
+
+@app.command("fetch-website")
+def fetch_website(
+    url: Annotated[str, typer.Argument(help="Website URL to fetch and prune for LLM context.")],
+    output_path: Annotated[
+        Path,
+        typer.Option(
+            "--output",
+            "-o",
+            help="Markdown file where the pruned website context will be written.",
+        ),
+    ],
+    max_chars: Annotated[
+        int,
+        typer.Option(
+            "--max-chars",
+            min=500,
+            help="Maximum characters to keep from the extracted main-body Markdown.",
+        ),
+    ] = DEFAULT_MAX_CHARS,
+) -> None:
+    """Fetch one website and write short, anti-boilerplate Markdown context."""
+    try:
+        written_path = write_website_context(url=url, output_path=output_path, max_chars=max_chars)
+    except WebsiteContextError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo(f"Wrote pruned website context to {written_path}")
 
 
 @app.command()
