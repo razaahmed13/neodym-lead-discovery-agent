@@ -50,6 +50,8 @@ def test_extract_main_markdown_keeps_whole_page_text_except_layout_chrome() -> N
       </main>
       <aside>Related article sidebar should be removed.</aside>
       <div class="right-sidebar">Newsletter signup sidebar should be removed.</div>
+      <div class="ad-banner">Paid ad banner should be removed.</div>
+      <div id="sponsored-ad">Sponsored placement should be removed.</div>
       <section>
         <h2>FAQ outside main</h2>
         <p>Important page details that simple visible-text extraction should keep.</p>
@@ -67,7 +69,27 @@ def test_extract_main_markdown_keeps_whole_page_text_except_layout_chrome() -> N
     assert "Top navigation" not in markdown
     assert "Related article sidebar" not in markdown
     assert "Newsletter signup sidebar" not in markdown
+    assert "Paid ad banner" not in markdown
+    assert "Sponsored placement" not in markdown
     assert "Privacy Policy" not in markdown
+
+
+def test_extract_main_markdown_does_not_truncate_by_default() -> None:
+    long_text = " ".join(f"Important detail {index}" for index in range(1200))
+    html = f"""
+    <html><body>
+      <main>
+        <h1>Long services page</h1>
+        <p>{long_text}</p>
+      </main>
+    </body></html>
+    """
+
+    markdown = extract_main_markdown(html, url="https://example.com/services")
+
+    assert "Important detail 0" in markdown
+    assert "Important detail 1199" in markdown
+    assert len(markdown) > 12_000
 
 
 def test_extract_main_markdown_keeps_contact_details_from_simple_visible_text() -> None:

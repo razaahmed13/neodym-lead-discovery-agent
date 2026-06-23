@@ -194,11 +194,14 @@ def fetch_website(
         ),
     ],
     max_chars: Annotated[
-        int,
+        int | None,
         typer.Option(
             "--max-chars",
             min=500,
-            help="Maximum characters to keep from the extracted visible page text.",
+            help=(
+                "Optional maximum characters to keep from extracted visible page text. "
+                "By default, no truncation is applied."
+            ),
         ),
     ] = DEFAULT_MAX_CHARS,
     reader_output_path: Annotated[

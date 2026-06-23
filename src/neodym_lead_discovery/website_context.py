@@ -7,7 +7,7 @@ from xml.etree import ElementTree
 
 from trafilatura import fetch_url
 
-DEFAULT_MAX_CHARS = 12_000
+DEFAULT_MAX_CHARS: int | None = None
 WHITELISTED_PATHS = {
     # Home page variants.
     "/",
@@ -129,7 +129,7 @@ class _VisibleTextParser(HTMLParser):
 def extract_main_markdown(
     html: str,
     url: str | None = None,
-    max_chars: int = DEFAULT_MAX_CHARS,
+    max_chars: int | None = DEFAULT_MAX_CHARS,
 ) -> str:
     """Extract visible page text while skipping common layout chrome.
 
@@ -168,7 +168,7 @@ def discover_whitelisted_urls(url: str, fetcher=None) -> list[str]:
     return _dedupe_preserving_order([_canonical_homepage(base_url), *homepage_urls])
 
 
-def fetch_website_context(url: str, max_chars: int = DEFAULT_MAX_CHARS) -> tuple[str, int]:
+def fetch_website_context(url: str, max_chars: int | None = DEFAULT_MAX_CHARS) -> tuple[str, int]:
     """Fetch whitelisted pages and return compact, LLM-ready website context Markdown."""
     discovered_urls = discover_whitelisted_urls(url)
     page_sections: list[str] = []
@@ -195,7 +195,7 @@ def fetch_website_context(url: str, max_chars: int = DEFAULT_MAX_CHARS) -> tuple
 def write_website_context(
     url: str,
     output_path: Path,
-    max_chars: int = DEFAULT_MAX_CHARS,
+    max_chars: int | None = DEFAULT_MAX_CHARS,
 ) -> tuple[Path, int]:
     """Fetch and write compact website context to a Markdown file."""
     context, page_count = fetch_website_context(url, max_chars=max_chars)
@@ -283,6 +283,9 @@ def _has_sidebar_attribute(attrs: list[tuple[str, str | None]]) -> bool:
         normalized = value.lower()
         if "sidebar" in normalized or "side-bar" in normalized:
             return True
+        tokens = {token for token in normalized.replace("_", "-").split("-") if token}
+        if tokens.intersection({"ad", "ads", "advertisement", "sponsored", "promo"}):
+            return True
     return False
 
 
@@ -315,7 +318,7 @@ def _extract_visible_text_markdown(html: str) -> str:
     return "\n".join(parser.lines).strip()
 
 
-def _compact_markdown(markdown: str, max_chars: int) -> str:
+def _compact_markdown(markdown: str, max_chars: int | None) -> str:
     lines: list[str] = []
     previous_blank = False
     for raw_line in markdown.splitlines():
@@ -329,7 +332,7 @@ def _compact_markdown(markdown: str, max_chars: int) -> str:
         previous_blank = False
 
     compact = "\n".join(lines).strip()
-    if len(compact) <= max_chars:
+    if max_chars is None or len(compact) <= max_chars:
         return compact
     truncated = compact[:max_chars].rsplit("\n", 1)[0].rstrip()
     return f"{truncated}\n\n[Truncated to {max_chars} characters for LLM context budget.]"
