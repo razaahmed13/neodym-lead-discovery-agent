@@ -6,76 +6,44 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from neodym_lead_discovery import cli
-from neodym_lead_discovery.models import (
-    EnrichedCompany,
-    LeadCandidate,
-    StructuredCompanyProfile,
-)
+from neodym_lead_discovery.models import LeadCandidate
 from neodym_lead_discovery.storage import LeadStorage
 from neodym_lead_discovery.ui import load_dashboard_data, render_dashboard_html
 
 runner = CliRunner()
 
 
-def test_load_dashboard_data_summarizes_candidates_and_enriched_companies(tmp_path: Path):
+def test_load_dashboard_data_summarizes_discovered_candidates(tmp_path: Path):
     db_path = tmp_path / "lead_discovery.sqlite"
     storage = LeadStorage(db_path)
     storage.initialize()
-    candidate_id = storage.upsert_candidate(
+    storage.upsert_candidate(
         LeadCandidate(
             company_name="ABC Logistics",
             website="https://abc.example",
             industry="logistics",
+            location="Austin, TX",
             company_size="85",
             discovery_source="apollo_api",
         )
     )
-    storage.save_enriched_company(
-        candidate_id,
-        EnrichedCompany(
-            candidate=LeadCandidate(company_name="ABC Logistics", website="https://abc.example"),
-            website_summary="Regional freight operations partner.",
-            services_or_products=["Dispatch", "Warehouse coordination"],
-            operational_complexity_signals=["dispatch", "scheduling"],
-            structured_profile=StructuredCompanyProfile(
-                company_name="ABC Logistics",
-                website="https://abc.example",
-                summary="Regional freight operations partner.",
-                llm_context={
-                    "pages_crawled": 2,
-                    "page_evidence": [
-                        {
-                            "url": "https://abc.example/services",
-                            "page_summary": "Services page summary.",
-                            "manual_process_signals": ["Driver scheduling"],
-                            "automation_opportunities": ["Automate driver scheduling"],
-                            "supporting_excerpt": "schedules drivers",
-                            "limitations": ["No explicit manual tooling evidence"],
-                        }
-                    ],
-                },
-            ),
-        ),
-    )
 
     dashboard = load_dashboard_data(db_path)
 
-    assert dashboard["metrics"] == {
-        "candidates": 1,
-        "enriched_companies": 1,
-        "automation_opportunities": 1,
-        "manual_process_signals": 1,
+    assert dashboard["metrics"] == {"candidates": 1}
+    assert dashboard["candidates"][0] == {
+        "company": "ABC Logistics",
+        "website": "https://abc.example",
+        "industry": "logistics",
+        "location": "Austin, TX",
+        "employees": "85",
+        "source": "apollo_api",
+        "status": "discovered",
     }
-    assert dashboard["candidates"][0]["status"] == "enriched"
-    assert dashboard["candidates"][0]["company"] == "ABC Logistics"
-    assert dashboard["enriched_companies"][0]["summary"] == "Regional freight operations partner."
-    assert dashboard["enriched_companies"][0]["pages_crawled"] == 2
-    assert dashboard["enriched_companies"][0]["automation_opportunities"] == [
-        "Automate driver scheduling"
-    ]
+    assert "enriched_companies" not in dashboard
 
 
-def test_ui_command_launches_streamlit_with_project_dashboard(tmp_path: Path, monkeypatch):
+def test_ui_command_launches_project_dashboard(tmp_path: Path, monkeypatch):
     db_path = tmp_path / "lead_discovery.sqlite"
     calls: list[dict[str, object]] = []
 
@@ -102,51 +70,25 @@ def test_ui_command_launches_streamlit_with_project_dashboard(tmp_path: Path, mo
     assert calls[0]["check"] is True
 
 
-def test_dashboard_sidebar_lists_candidates_and_selects_one_enriched_company(tmp_path: Path):
+def test_dashboard_sidebar_lists_candidates_only(tmp_path: Path):
     db_path = tmp_path / "lead_discovery.sqlite"
     storage = LeadStorage(db_path)
     storage.initialize()
-    first_candidate_id = storage.upsert_candidate(
+    storage.upsert_candidate(
         LeadCandidate(company_name="ABC Logistics", website="https://abc.example")
     )
-    second_candidate_id = storage.upsert_candidate(
+    storage.upsert_candidate(
         LeadCandidate(company_name="Clearview Health", website="https://clearview.example")
-    )
-    storage.save_enriched_company(
-        first_candidate_id,
-        EnrichedCompany(
-            candidate=LeadCandidate(company_name="ABC Logistics", website="https://abc.example"),
-            structured_profile=StructuredCompanyProfile(
-                company_name="ABC Logistics",
-                website="https://abc.example",
-                summary="Logistics summary",
-            ),
-        ),
-    )
-    storage.save_enriched_company(
-        second_candidate_id,
-        EnrichedCompany(
-            candidate=LeadCandidate(
-                company_name="Clearview Health", website="https://clearview.example"
-            ),
-            structured_profile=StructuredCompanyProfile(
-                company_name="Clearview Health",
-                website="https://clearview.example",
-                summary="Healthcare summary",
-            ),
-        ),
     )
 
     html = render_dashboard_html(db_path)
 
     assert '<aside class="sidebar"' in html
     assert "Candidates" in html
-    assert "Enriched companies" in html
     assert "ABC Logistics" in html
     assert "Clearview Health" in html
-    assert 'class="enriched-selector active"' in html
-    assert 'data-select-company="company-0"' in html
-    assert 'data-select-company="company-1"' in html
-    assert 'data-company-card="company-0"' in html
-    assert 'data-company-card="company-1"' in html
-    assert "selectCompany" in html
+    assert "Enriched companies" not in html
+    assert "enriched-selector" not in html
+    assert "data-select-company" not in html
+    assert "data-company-card" not in html
+    assert "selectCompany" not in html

@@ -6,7 +6,6 @@ from pydantic import ValidationError
 from neodym_lead_discovery.models import (
     ContactCandidate,
     CriterionEvaluation,
-    EnrichedCompany,
     LeadCandidate,
     QualifiedLead,
     ScoreBreakdown,
@@ -93,7 +92,7 @@ def test_qualified_lead_requires_source_links():
         )
 
 
-def test_lead_candidate_and_enriched_company_keep_source_evidence():
+def test_lead_candidate_keeps_source_evidence():
     evidence = SourceEvidence(
         url="https://example.com/about",
         label="about page",
@@ -110,17 +109,6 @@ def test_lead_candidate_and_enriched_company_keep_source_evidence():
         raw_sources=[evidence],
         discovery_source="apollo_export",
     )
-    enriched = EnrichedCompany(
-        candidate=candidate,
-        website_title="Example Co",
-        website_summary="Insurance claims processing services.",
-        services_or_products=["Claims processing"],
-        job_signals=["Hiring operations manager"],
-        growth_signals=["Expanding team"],
-        operational_complexity_signals=["Claims intake"],
-        contact_candidates=[ContactCandidate(name="Jane Doe", role="CEO", email=None, source_url="https://example.com/team")],
-        evidence=[evidence],
-    )
 
-    assert enriched.candidate.discovery_source == "apollo_export"
-    assert enriched.evidence[0].snippet.startswith("Example Co")
+    assert candidate.discovery_source == "apollo_export"
+    assert candidate.raw_sources[0].snippet.startswith("Example Co")

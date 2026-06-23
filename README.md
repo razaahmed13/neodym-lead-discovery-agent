@@ -11,17 +11,22 @@ This project is not a generic lead scraper. It is designed to produce actionable
 Implemented so far:
 
 - Python CLI project scaffold with `uv`, Typer, pytest, and ruff.
-- Pydantic data models for raw candidates, enriched companies, scoring evidence, and final qualified leads.
+- Pydantic data models for raw discovery candidates, scoring evidence, and final qualified leads.
 - SQLite storage for candidates, pipeline runs, and future qualified leads.
 - Manual CSV/Apollo-export import via `lead-discovery discover --csv/--apollo-csv`.
 - Automated Apollo API company discovery via `lead-discovery discover --apollo-api` or by setting `APOLLO_API_KEY` and running `discover` with no CSV.
 - Deterministic company/domain normalization and candidate upsert deduplication.
-- Reusable public website, careers/job-signal, and contact-candidate extraction helpers.
+- Local discovery dashboard showing fetched candidates.
 - Tests for the implemented behavior.
+
+Removed intentionally:
+
+- The previous post-discovery website/careers/contact enrichment workflow.
+- The `enrich` CLI command, enrichment package, enriched-company model/storage table, and enrichment dashboard sections.
 
 Still pending:
 
-- Wiring website/careers/contact enrichment into the `enrich` CLI command.
+- New post-discovery context-building approach.
 - AI/Codex reasoning export/import.
 - Deterministic fit scoring.
 - `lead_list.json` and `lead_report.md` generation.
@@ -108,20 +113,11 @@ PY
 
 ## Planned Architecture
 
-The implementation plan in `docs/plans/2026-06-22-lead-discovery-agent.md` proposes a local-first Python CLI pipeline:
-
-1. Ingest companies from Apollo API, CSV exports, and public/free web sources.
-2. Normalize and deduplicate lead candidates.
-3. Enrich companies from websites, search snippets, job pages, and public metadata.
-4. Run AI-assisted analysis through a provider abstraction that supports approved local/Hermes/Codex workflows now and production LLM APIs later.
-5. Score leads with an explainable rubric.
-6. Generate JSON and Markdown reports.
-7. Evaluate output quality and optionally send a weekly internal digest.
+The original enrichment path has been discarded. The current committed foundation is intentionally limited to discovery, storage, UI inspection, scoring/reporting models, and placeholder downstream commands until the new post-discovery context-building approach is designed.
 
 ## Repository Contents
 
 - `docs/extracted-specification.md` — searchable text extracted from the provided DOCX project statement.
-- `docs/plans/2026-06-22-lead-discovery-agent.md` — detailed end-to-end implementation plan.
 - `src/neodym_lead_discovery/discovery/apollo_api.py` — Apollo API discovery adapter.
 - `src/neodym_lead_discovery/discovery/csv_importer.py` — CSV/Apollo-export importer.
 - `src/neodym_lead_discovery/storage.py` — SQLite persistence.

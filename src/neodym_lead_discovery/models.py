@@ -18,7 +18,7 @@ Confidence = Literal["low", "medium", "high"]
 
 
 class SourceEvidence(BaseModel):
-    """A source-grounded snippet used to justify enrichment or scoring."""
+    """A source-grounded snippet used to justify discovery, scoring, or final reporting."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -29,7 +29,7 @@ class SourceEvidence(BaseModel):
 
 
 class ContactCandidate(BaseModel):
-    """A public contact candidate or suggested decision-maker role."""
+    """A public contact candidate or suggested decision-maker role for final leads."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -61,55 +61,6 @@ class LeadCandidate(BaseModel):
         if not value:
             raise ValueError("company_name cannot be blank")
         return value
-
-
-class WebsitePageProfile(BaseModel):
-    """Structured content extracted from one public website page."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    url: str
-    page_type: str = "other"
-    title: str | None = None
-    meta_description: str | None = None
-    headings: list[str] = Field(default_factory=list)
-    text: str
-    outbound_links: list[str] = Field(default_factory=list)
-    operational_signals: list[str] = Field(default_factory=list)
-    rendered_with_javascript: bool = False
-
-
-class StructuredCompanyProfile(BaseModel):
-    """LLM-ready company profile assembled from crawled public website pages."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    company_name: str
-    website: str | None = None
-    summary: str | None = None
-    services_or_products: list[str] = Field(default_factory=list)
-    operational_complexity_signals: list[str] = Field(default_factory=list)
-    contact_candidates: list[ContactCandidate] = Field(default_factory=list)
-    source_urls: list[str] = Field(default_factory=list)
-    llm_context: dict[str, object] = Field(default_factory=dict)
-
-
-class EnrichedCompany(BaseModel):
-    """Lead candidate plus public website/careers/contact enrichment."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    candidate: LeadCandidate
-    website_title: str | None = None
-    website_summary: str | None = None
-    services_or_products: list[str] = Field(default_factory=list)
-    job_signals: list[str] = Field(default_factory=list)
-    growth_signals: list[str] = Field(default_factory=list)
-    operational_complexity_signals: list[str] = Field(default_factory=list)
-    contact_candidates: list[ContactCandidate] = Field(default_factory=list)
-    evidence: list[SourceEvidence] = Field(default_factory=list)
-    page_profiles: list[WebsitePageProfile] = Field(default_factory=list)
-    structured_profile: StructuredCompanyProfile | None = None
 
 
 class CriterionEvaluation(BaseModel):

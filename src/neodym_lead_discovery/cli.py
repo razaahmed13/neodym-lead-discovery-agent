@@ -20,11 +20,10 @@ from neodym_lead_discovery.discovery.apollo_api import (
     discover_from_apollo,
 )
 from neodym_lead_discovery.discovery.csv_importer import import_csv
-from neodym_lead_discovery.enrichment.website import enrich_public_website
 from neodym_lead_discovery.storage import LeadStorage
 
 app = typer.Typer(
-    help="Discover, enrich, analyze, score, report, and evaluate Neodym lead opportunities.",
+    help="Discover, analyze, score, report, and evaluate Neodym lead opportunities.",
     no_args_is_help=True,
 )
 
@@ -173,50 +172,8 @@ def discover(
 
 
 @app.command()
-def enrich(
-    db_path: Annotated[
-        Path,
-        typer.Option(
-            "--db",
-            help="SQLite database path. Defaults to the shared project database.",
-        ),
-    ] = DEFAULT_DB_PATH,
-    limit: Annotated[
-        int | None,
-        typer.Option("--limit", min=1, help="Maximum candidates to enrich."),
-    ] = None,
-    max_pages: Annotated[
-        int,
-        typer.Option(
-            "--max-pages",
-            min=1,
-            max=25,
-            help="Maximum website pages to crawl per company.",
-        ),
-    ] = 8,
-) -> None:
-    """Enrich lead candidates from public websites and persist LLM-ready profiles."""
-    storage = LeadStorage(db_path)
-    storage.initialize()
-    candidates = storage.list_candidates(limit=limit)
-    enriched_count = 0
-    skipped_count = 0
-    for candidate_id, candidate in candidates:
-        if not candidate.website:
-            skipped_count += 1
-            continue
-        enriched = enrich_public_website(candidate, max_pages=max_pages)
-        storage.save_enriched_company(candidate_id, enriched)
-        enriched_count += 1
-    typer.echo(
-        f"Enriched {enriched_count} companies into {db_path} "
-        f"({skipped_count} skipped without websites)."
-    )
-
-
-@app.command()
 def analyze() -> None:
-    """Export/import Codex CLI reasoning batches."""
+    """Export/import reasoning batches."""
     typer.echo("analyze: not implemented yet")
 
 
@@ -258,7 +215,7 @@ def ui(
         typer.Option("--port", min=1, max=65535, help="Local UI server port."),
     ] = 8501,
 ) -> None:
-    """Launch the local dashboard for candidates and enriched companies."""
+    """Launch the local dashboard for discovered candidates."""
     env = os.environ.copy()
     env["LEAD_DISCOVERY_DB"] = str(db_path)
     typer.echo(f"Starting Lead Discovery UI for {db_path} on http://localhost:{port}")

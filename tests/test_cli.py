@@ -9,7 +9,7 @@ def test_cli_help_lists_pipeline_commands():
     result = runner.invoke(app, ["--help"])
 
     assert result.exit_code == 0
-    commands = ["discover", "enrich", "analyze", "score", "report", "evaluate", "digest", "run-all"]
+    commands = ["discover", "analyze", "score", "report", "evaluate", "digest", "run-all"]
     for command in commands:
         assert command in result.output
 
