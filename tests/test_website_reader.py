@@ -36,6 +36,16 @@ def test_build_reader_prompt_requires_tiny_strict_json_schema() -> None:
     assert "# Website context" in prompt
 
 
+def test_build_reader_prompt_defines_manual_friction_as_workflow_signals() -> None:
+    prompt = build_reader_prompt("# Website context\nUseful text")
+
+    assert "manual_friction_clues" in prompt
+    assert "Do not merely copy generic form fields, phone numbers, or app/portal mentions" in prompt
+    assert "human-assisted decisions" in prompt
+    assert "phone-based assistance" in prompt
+    assert "structured intake that may require downstream review" in prompt
+
+
 def test_parse_reader_json_requires_exact_schema_keys() -> None:
     parsed = parse_reader_json(json.dumps(VALID_READER_JSON))
 
