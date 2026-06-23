@@ -44,6 +44,7 @@ def test_build_reader_prompt_defines_manual_friction_as_workflow_signals() -> No
     assert "human-assisted decisions" in prompt
     assert "phone-based assistance" in prompt
     assert "structured intake that may require downstream review" in prompt
+    assert "manual process that could be automated using AI agents or automation" in prompt
 
 
 def test_parse_reader_json_requires_exact_schema_keys() -> None:
