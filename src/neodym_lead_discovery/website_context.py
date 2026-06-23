@@ -11,11 +11,13 @@ DEFAULT_MAX_CHARS = 12_000
 WHITELISTED_PATHS = {
     "/",
     "/about",
+    "/about-us",
     "/our-story",
     "/services",
     "/solutions",
     "/what-we-do",
     "/contact",
+    "/contact-us",
 }
 
 

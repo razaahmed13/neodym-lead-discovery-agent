@@ -27,16 +27,18 @@ class ReaderError(RuntimeError):
 def build_reader_prompt(website_markdown: str) -> str:
     """Build the tiny Reader prompt for extracting a strict five-key fact sheet."""
     schema = {
-        "core_business_model": None,
-        "explicit_services_offered": None,
-        "mentioned_software_or_tools": None,
-        "manual_friction_clues": None,
-        "key_executives": None,
+        "core_business_model": "string or null",
+        "explicit_services_offered": ["array of strings, or null"],
+        "mentioned_software_or_tools": ["array of strings, or null"],
+        "manual_friction_clues": ["array of strings, or null"],
+        "key_executives": ["array of strings, or null"],
     }
     return (
         "Scan this website text. Extract only the following 5 data points into this "
         "strict JSON schema. If a point is not explicitly mentioned, write null. "
-        "Do not write a summary. Return only valid JSON with exactly these keys.\n\n"
+        "For every field except core_business_model, return either an array of strings "
+        "or null; never return a bare string. Do not write a summary. Return only valid "
+        "JSON with exactly these keys.\n\n"
         f"JSON schema:\n{json.dumps(schema, indent=2)}\n\n"
         "Website text:\n"
         f"{website_markdown}"
@@ -69,10 +71,10 @@ def parse_reader_json(response_text: str) -> dict[str, Any]:
     actual_keys = set(payload.keys())
     if actual_keys != expected_keys:
         raise ReaderError(
-            "Reader response must contain exactly these keys: "
-            + ", ".join(READER_SCHEMA_KEYS)
+            "Reader response must contain exactly these keys: " + ", ".join(READER_SCHEMA_KEYS)
         )
 
+    _normalize_reader_types(payload)
     _validate_reader_types(payload)
     return {key: payload[key] for key in READER_SCHEMA_KEYS}
 
@@ -114,6 +116,15 @@ def _strip_json_fences(response_text: str) -> str:
     if fence_match:
         return fence_match.group(1).strip()
     return stripped
+
+
+def _normalize_reader_types(payload: dict[str, Any]) -> None:
+    """Tolerate common Gemini JSON drift without losing strict output shape."""
+    for key in READER_SCHEMA_KEYS[1:]:
+        value = payload[key]
+        if isinstance(value, str):
+            stripped = value.strip()
+            payload[key] = [stripped] if stripped else None
 
 
 def _validate_reader_types(payload: dict[str, Any]) -> None:

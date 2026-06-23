@@ -42,6 +42,15 @@ def test_parse_reader_json_requires_exact_schema_keys() -> None:
     assert parsed == VALID_READER_JSON
 
 
+def test_parse_reader_json_normalizes_single_string_array_fields() -> None:
+    gemini_payload = dict(VALID_READER_JSON)
+    gemini_payload["manual_friction_clues"] = "Quote flow asks users to call an agent"
+
+    parsed = parse_reader_json(json.dumps(gemini_payload))
+
+    assert parsed["manual_friction_clues"] == ["Quote flow asks users to call an agent"]
+
+
 def test_parse_reader_json_rejects_extra_or_missing_keys() -> None:
     invalid = dict(VALID_READER_JSON)
     invalid["extra_summary"] = "not allowed"

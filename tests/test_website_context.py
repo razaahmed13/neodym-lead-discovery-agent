@@ -44,10 +44,12 @@ def test_discover_whitelisted_urls_uses_strict_router_from_homepage_links() -> N
     homepage_html = """
     <html><body>
       <a href="/about">About</a>
+      <a href="/about-us">About us</a>
       <a href="/services/">Services</a>
       <a href="/solutions?ref=nav">Solutions</a>
       <a href="/what-we-do">What we do</a>
       <a href="/contact#form">Contact</a>
+      <a href="/contact-us">Contact us</a>
       <a href="/blog">Blog</a>
       <a href="/articles/how-to-automate">Article</a>
       <a href="https://other.example/about">External About</a>
@@ -65,10 +67,12 @@ def test_discover_whitelisted_urls_uses_strict_router_from_homepage_links() -> N
     assert urls == [
         "https://example.com/",
         "https://example.com/about",
+        "https://example.com/about-us",
         "https://example.com/services/",
         "https://example.com/solutions?ref=nav",
         "https://example.com/what-we-do",
         "https://example.com/contact#form",
+        "https://example.com/contact-us",
     ]
 
 
@@ -76,8 +80,10 @@ def test_discover_whitelisted_urls_prefers_sitemap_when_available() -> None:
     sitemap_xml = """
     <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
       <url><loc>https://example.com/about</loc></url>
+      <url><loc>https://example.com/about-us</loc></url>
       <url><loc>https://example.com/blog</loc></url>
       <url><loc>https://example.com/contact</loc></url>
+      <url><loc>https://example.com/contact-us</loc></url>
       <url><loc>https://other.example/services</loc></url>
     </urlset>
     """
@@ -91,7 +97,9 @@ def test_discover_whitelisted_urls_prefers_sitemap_when_available() -> None:
     assert urls == [
         "https://example.com/",
         "https://example.com/about",
+        "https://example.com/about-us",
         "https://example.com/contact",
+        "https://example.com/contact-us",
     ]
 
 
@@ -112,9 +120,7 @@ def test_fetch_website_command_writes_multiple_whitelisted_pages(
     pages = {
         "https://example.com/sitemap.xml": None,
         "https://example.com": (
-            '<a href="/about">About</a>'
-            '<a href="/services">Services</a>'
-            '<a href="/blog">Blog</a>'
+            '<a href="/about">About</a><a href="/services">Services</a><a href="/blog">Blog</a>'
         ),
         "https://example.com/": HTML_WITH_BOILERPLATE,
         "https://example.com/about": about_html,
