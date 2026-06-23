@@ -23,13 +23,18 @@ VALID_READER_JSON = {
     "mentioned_software_or_tools": ["HubSpot"],
     "manual_friction_clues": ["workflow procedures"],
     "key_executives": ["Jane Doe - CEO"],
+    "job_openings": ["Chief Information Security Officer (CISO)"],
+    "contact_emails": [
+        {"email": "support@example.com", "name": None, "post": "Support"},
+        {"email": "jane@example.com", "name": "Jane Doe", "post": "CEO"},
+    ],
 }
 
 
 def test_build_reader_prompt_requires_tiny_strict_json_schema() -> None:
     prompt = build_reader_prompt("# Website context\nUseful text")
 
-    assert "Extract only the following 5 data points" in prompt
+    assert "Extract only the following 7 data points" in prompt
     assert "Do not write a summary" in prompt
     for key in READER_SCHEMA_KEYS:
         assert f'"{key}"' in prompt
@@ -47,6 +52,19 @@ def test_build_reader_prompt_defines_manual_friction_as_workflow_signals() -> No
     assert "manual process that could be automated using AI agents or automation" in prompt
 
 
+def test_build_reader_prompt_requests_jobs_and_contact_email_context() -> None:
+    prompt = build_reader_prompt("# Website context\nUseful text")
+
+    assert "job_openings" in prompt
+    assert "career page" in prompt
+    assert "null if no job openings are explicitly present" in prompt
+    assert "contact_emails" in prompt
+    assert "raw content" in prompt
+    assert "name" in prompt
+    assert "post" in prompt
+    assert "use null when name or post is not available" in prompt
+
+
 def test_parse_reader_json_requires_exact_schema_keys() -> None:
     parsed = parse_reader_json(json.dumps(VALID_READER_JSON))
 
@@ -56,10 +74,36 @@ def test_parse_reader_json_requires_exact_schema_keys() -> None:
 def test_parse_reader_json_normalizes_single_string_array_fields() -> None:
     gemini_payload = dict(VALID_READER_JSON)
     gemini_payload["manual_friction_clues"] = "Quote flow asks users to call an agent"
+    gemini_payload["job_openings"] = "Chief Information Security Officer (CISO)"
 
     parsed = parse_reader_json(json.dumps(gemini_payload))
 
     assert parsed["manual_friction_clues"] == ["Quote flow asks users to call an agent"]
+    assert parsed["job_openings"] == ["Chief Information Security Officer (CISO)"]
+
+
+def test_parse_reader_json_allows_null_jobs_and_contact_emails() -> None:
+    gemini_payload = dict(VALID_READER_JSON)
+    gemini_payload["job_openings"] = None
+    gemini_payload["contact_emails"] = None
+
+    parsed = parse_reader_json(json.dumps(gemini_payload))
+
+    assert parsed["job_openings"] is None
+    assert parsed["contact_emails"] is None
+
+
+def test_parse_reader_json_requires_contact_email_objects() -> None:
+    gemini_payload = dict(VALID_READER_JSON)
+    gemini_payload["contact_emails"] = [{"email": "support@example.com", "name": None}]
+
+    try:
+        parse_reader_json(json.dumps(gemini_payload))
+    except ReaderError as exc:
+        assert "contact_emails" in str(exc)
+        assert "email, name, and post" in str(exc)
+    else:
+        raise AssertionError("Expected ReaderError for invalid contact email object")
 
 
 def test_parse_reader_json_rejects_extra_or_missing_keys() -> None:
