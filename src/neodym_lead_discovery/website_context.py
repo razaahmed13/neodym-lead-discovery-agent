@@ -241,7 +241,7 @@ def _is_allowed_same_domain(base_url: str, candidate_url: str) -> bool:
     candidate = urlparse(candidate_url)
     if candidate.scheme not in {"http", "https"}:
         return False
-    if candidate.netloc.lower() != base.netloc.lower():
+    if _normalized_site_host(candidate.netloc) != _normalized_site_host(base.netloc):
         return False
     normalized_path = candidate.path.rstrip("/") or "/"
     return normalized_path in WHITELISTED_PATHS
@@ -273,7 +273,12 @@ def _dedupe_preserving_order(urls: list[str]) -> list[str]:
 def _dedupe_key(url: str) -> str:
     parsed = urlparse(url)
     path = parsed.path.rstrip("/") or "/"
-    return f"{parsed.scheme}://{parsed.netloc.lower()}{path}"
+    return f"{parsed.scheme}://{_normalized_site_host(parsed.netloc)}{path}"
+
+
+def _normalized_site_host(netloc: str) -> str:
+    host = netloc.lower()
+    return host[4:] if host.startswith("www.") else host
 
 
 def _has_sidebar_attribute(attrs: list[tuple[str, str | None]]) -> bool:

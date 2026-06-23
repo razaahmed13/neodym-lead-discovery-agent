@@ -222,6 +222,34 @@ def test_discover_whitelisted_urls_uses_strict_router_from_homepage_links() -> N
     ]
 
 
+def test_discover_whitelisted_urls_accepts_www_and_apex_as_same_site() -> None:
+    homepage_html = """
+    <html><body>
+      <a href="https://smarttalentstaffing.com/services/">Services</a>
+      <a href="https://smarttalentstaffing.com/about/">About</a>
+      <a href="https://smarttalentstaffing.com/contact-us/">Contact</a>
+    </body></html>
+    """
+
+    def fake_fetch_url(url: str) -> str | None:
+        assert url in {
+            "https://www.smarttalentstaffing.com",
+            "https://www.smarttalentstaffing.com/sitemap.xml",
+        }
+        if url.endswith("sitemap.xml"):
+            return None
+        return homepage_html
+
+    urls = discover_whitelisted_urls("https://www.smarttalentstaffing.com/", fetcher=fake_fetch_url)
+
+    assert urls == [
+        "https://www.smarttalentstaffing.com/",
+        "https://smarttalentstaffing.com/services/",
+        "https://smarttalentstaffing.com/about/",
+        "https://smarttalentstaffing.com/contact-us/",
+    ]
+
+
 def test_discover_whitelisted_urls_prefers_sitemap_when_available() -> None:
     sitemap_xml = """
     <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
