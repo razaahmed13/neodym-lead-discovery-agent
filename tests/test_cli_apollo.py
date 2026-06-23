@@ -11,7 +11,15 @@ def test_discover_with_apollo_api_imports_companies_from_env_key(monkeypatch, tm
             assert api_key == "env-apollo-key"
 
     def fake_discover_from_apollo(
-        *, client, max_results, per_page, locations, industries, keywords
+        *,
+        client,
+        max_results,
+        per_page,
+        locations,
+        industries,
+        keywords,
+        min_employees,
+        max_employees,
     ):
         from neodym_lead_discovery.models import LeadCandidate
 
@@ -19,8 +27,26 @@ def test_discover_with_apollo_api_imports_companies_from_env_key(monkeypatch, tm
         assert max_results == 2
         assert per_page == 2
         assert locations == ["United States"]
-        assert "healthcare" in industries
-        assert "workflow automation" in keywords
+        assert industries == [
+            "logistics",
+            "insurance",
+            "staffing and recruiting",
+            "legal services",
+            "healthcare operations",
+            "professional services",
+        ]
+        assert keywords == [
+            "claims processing",
+            "back office",
+            "document processing",
+            "customer operations",
+            "dispatch",
+            "intake",
+            "scheduling",
+            "compliance",
+        ]
+        assert min_employees == 20
+        assert max_employees == 500
         return [
             LeadCandidate(
                 company_name="Acme Claims",

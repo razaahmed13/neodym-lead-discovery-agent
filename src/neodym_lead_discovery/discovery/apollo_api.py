@@ -10,20 +10,37 @@ from neodym_lead_discovery.models import LeadCandidate, SourceEvidence
 APOLLO_COMPANY_SEARCH_URL = "https://api.apollo.io/api/v1/organizations/search"
 DEFAULT_APOLLO_LOCATIONS = ["United States"]
 DEFAULT_APOLLO_INDUSTRIES = [
-    "healthcare",
-    "legal services",
     "logistics",
     "insurance",
     "staffing and recruiting",
+    "legal services",
+    "healthcare operations",
     "professional services",
-    "software",
 ]
 DEFAULT_APOLLO_KEYWORDS = [
-    "workflow automation",
-    "operations",
-    "customer support",
-    "claims",
+    "claims processing",
+    "back office",
     "document processing",
+    "customer operations",
+    "dispatch",
+    "intake",
+    "scheduling",
+    "compliance",
+]
+DEFAULT_MIN_EMPLOYEES = 20
+DEFAULT_MAX_EMPLOYEES = 500
+APOLLO_EMPLOYEE_RANGE_BUCKETS = [
+    (1, 10, "1,10"),
+    (11, 20, "11,20"),
+    (21, 50, "21,50"),
+    (51, 100, "51,100"),
+    (101, 200, "101,200"),
+    (201, 500, "201,500"),
+    (501, 1000, "501,1000"),
+    (1001, 2000, "1001,2000"),
+    (2001, 5000, "2001,5000"),
+    (5001, 10000, "5001,10000"),
+    (10001, None, "10001,"),
 ]
 
 
@@ -42,6 +59,8 @@ class ApolloSearchConfig:
     )
     industries: list[str] = field(default_factory=lambda: DEFAULT_APOLLO_INDUSTRIES.copy())
     keywords: list[str] = field(default_factory=lambda: DEFAULT_APOLLO_KEYWORDS.copy())
+    min_employees: int | None = DEFAULT_MIN_EMPLOYEES
+    max_employees: int | None = DEFAULT_MAX_EMPLOYEES
 
     def to_payload(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -57,6 +76,9 @@ class ApolloSearchConfig:
             payload["q_organization_keyword_tags"] = self.industries
         if self.keywords:
             payload["q_organization_keywords"] = " OR ".join(self.keywords)
+        employee_ranges = _apollo_employee_ranges(self.min_employees, self.max_employees)
+        if employee_ranges:
+            payload["organization_num_employees_ranges"] = employee_ranges
         return payload
 
 
@@ -122,6 +144,8 @@ def discover_from_apollo(
     locations: list[str] | None = None,
     industries: list[str] | None = None,
     keywords: list[str] | None = None,
+    min_employees: int | None = DEFAULT_MIN_EMPLOYEES,
+    max_employees: int | None = DEFAULT_MAX_EMPLOYEES,
 ) -> list[LeadCandidate]:
     """Fetch company candidates from Apollo until max_results is reached."""
     candidates: list[LeadCandidate] = []
@@ -134,17 +158,56 @@ def discover_from_apollo(
                 organization_locations=locations or DEFAULT_APOLLO_LOCATIONS.copy(),
                 industries=industries or DEFAULT_APOLLO_INDUSTRIES.copy(),
                 keywords=keywords or DEFAULT_APOLLO_KEYWORDS.copy(),
+                min_employees=min_employees,
+                max_employees=max_employees,
             )
         )
         if not result.organizations:
             break
-        candidates.extend(result.organizations)
+        candidates.extend(
+            candidate
+            for candidate in result.organizations
+            if _candidate_matches_employee_range(candidate, min_employees, max_employees)
+        )
         if result.total_entries is not None and len(candidates) >= result.total_entries:
             break
         if len(result.organizations) < result.per_page:
             break
         page += 1
     return candidates[:max_results]
+
+
+def _apollo_employee_ranges(min_employees: int | None, max_employees: int | None) -> list[str]:
+    ranges: list[str] = []
+    for lower, upper, label in APOLLO_EMPLOYEE_RANGE_BUCKETS:
+        if max_employees is not None and lower > max_employees:
+            continue
+        if min_employees is not None and upper is not None and upper < min_employees:
+            continue
+        ranges.append(label)
+    return ranges
+
+
+def _candidate_matches_employee_range(
+    candidate: LeadCandidate,
+    min_employees: int | None,
+    max_employees: int | None,
+) -> bool:
+    employee_count = _parse_employee_count(candidate.company_size)
+    if employee_count is None:
+        return True
+    if min_employees is not None and employee_count < min_employees:
+        return False
+    return not (max_employees is not None and employee_count > max_employees)
+
+
+def _parse_employee_count(value: str | None) -> int | None:
+    if value is None:
+        return None
+    digits = "".join(character for character in value if character.isdigit())
+    if not digits:
+        return None
+    return int(digits)
 
 
 def _organization_to_candidate(organization: dict[str, Any]) -> LeadCandidate | None:

@@ -11,6 +11,8 @@ from neodym_lead_discovery.discovery.apollo_api import (
     DEFAULT_APOLLO_INDUSTRIES,
     DEFAULT_APOLLO_KEYWORDS,
     DEFAULT_APOLLO_LOCATIONS,
+    DEFAULT_MAX_EMPLOYEES,
+    DEFAULT_MIN_EMPLOYEES,
     ApolloApiError,
     ApolloClient,
     discover_from_apollo,
@@ -120,6 +122,14 @@ def discover(
         list[str] | None,
         typer.Option("--keyword", help="Apollo organization keyword filter. Repeatable."),
     ] = None,
+    min_employees: Annotated[
+        int | None,
+        typer.Option("--min-employees", min=1, help="Minimum company employee count."),
+    ] = DEFAULT_MIN_EMPLOYEES,
+    max_employees: Annotated[
+        int | None,
+        typer.Option("--max-employees", min=1, help="Maximum company employee count."),
+    ] = DEFAULT_MAX_EMPLOYEES,
 ) -> None:
     """Import or discover raw lead candidates."""
     storage = LeadStorage(db_path)
@@ -142,6 +152,8 @@ def discover(
                 locations=locations or DEFAULT_APOLLO_LOCATIONS.copy(),
                 industries=industries or DEFAULT_APOLLO_INDUSTRIES.copy(),
                 keywords=keywords or DEFAULT_APOLLO_KEYWORDS.copy(),
+                min_employees=min_employees,
+                max_employees=max_employees,
             )
         except ApolloApiError as exc:
             typer.echo(str(exc), err=True)
