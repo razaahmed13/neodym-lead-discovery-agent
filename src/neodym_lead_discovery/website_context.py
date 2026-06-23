@@ -38,6 +38,42 @@ class _AnchorHrefParser(HTMLParser):
                 self.hrefs.append(value)
 
 
+class _VisibleTextParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self._skip_depth = 0
+        self._main_depth = 0
+        self._saw_main = False
+        self.lines: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        del attrs
+        normalized = tag.lower()
+        if normalized in {"script", "style", "noscript", "svg", "header", "nav", "footer"}:
+            self._skip_depth += 1
+        if normalized == "main":
+            self._saw_main = True
+            self._main_depth += 1
+
+    def handle_endtag(self, tag: str) -> None:
+        normalized = tag.lower()
+        if normalized == "main" and self._main_depth:
+            self._main_depth -= 1
+        if (
+            normalized in {"script", "style", "noscript", "svg", "header", "nav", "footer"}
+            and self._skip_depth
+        ):
+            self._skip_depth -= 1
+
+    def handle_data(self, data: str) -> None:
+        text = " ".join(data.split())
+        if not text or self._skip_depth:
+            return
+        if self._saw_main and not self._main_depth:
+            return
+        self.lines.append(text)
+
+
 def extract_main_markdown(
     html: str,
     url: str | None = None,
@@ -57,9 +93,16 @@ def extract_main_markdown(
         favor_precision=True,
         deduplicate=True,
     )
+    fallback_markdown = _extract_visible_text_markdown(html)
     if not markdown or not markdown.strip():
+        if fallback_markdown:
+            return _compact_markdown(fallback_markdown, max_chars=max_chars)
         raise WebsiteContextError("Trafilatura could not extract useful main-body content.")
-    return _compact_markdown(markdown, max_chars=max_chars)
+
+    compact = _compact_markdown(markdown, max_chars=max_chars)
+    if _should_use_visible_text_fallback(compact, fallback_markdown):
+        return _compact_markdown(fallback_markdown, max_chars=max_chars)
+    return compact
 
 
 def discover_whitelisted_urls(url: str, fetcher=None) -> list[str]:
@@ -189,6 +232,23 @@ def _dedupe_key(url: str) -> str:
     parsed = urlparse(url)
     path = parsed.path.rstrip("/") or "/"
     return f"{parsed.scheme}://{parsed.netloc.lower()}{path}"
+
+
+def _extract_visible_text_markdown(html: str) -> str:
+    parser = _VisibleTextParser()
+    parser.feed(html)
+    unique_lines = _dedupe_preserving_order(parser.lines)
+    return "\n".join(unique_lines).strip()
+
+
+def _should_use_visible_text_fallback(markdown: str, fallback_markdown: str) -> bool:
+    markdown_words = _word_count(markdown)
+    fallback_words = _word_count(fallback_markdown)
+    return markdown_words < 25 and fallback_words >= markdown_words + 15
+
+
+def _word_count(text: str) -> int:
+    return len(text.split())
 
 
 def _compact_markdown(markdown: str, max_chars: int) -> str:

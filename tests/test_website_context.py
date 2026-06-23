@@ -2,6 +2,7 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
+from neodym_lead_discovery import website_context
 from neodym_lead_discovery.cli import app
 from neodym_lead_discovery.website_context import discover_whitelisted_urls, extract_main_markdown
 
@@ -38,6 +39,40 @@ def test_extract_main_markdown_prunes_navigation_footer_and_cookie_boilerplate()
     assert "Terms of Service" not in markdown
     assert "Privacy Policy" not in markdown
     assert "Accept all cookies" not in markdown
+
+
+def test_extract_main_markdown_falls_back_when_trafilatura_drops_contact_details(
+    monkeypatch,
+) -> None:
+    html = """
+    <html><body>
+      <header><nav>Resources Blog FAQ Careers Claims Log In</nav></header>
+      <main>
+        <h1>Contact us</h1>
+        <h2>Support</h2>
+        <p>Call us at (800) 585-0705</p>
+        <p>Email us at support@example.com</p>
+        <p>Monday - Friday 7 a.m. - 8 p.m. CT</p>
+        <h2>Agents</h2>
+        <p>(650) 426-0546</p>
+      </main>
+      <footer>Privacy Policy Terms and Conditions Copyright 2026</footer>
+    </body></html>
+    """
+
+    monkeypatch.setattr(
+        website_context,
+        "extract",
+        lambda *args, **kwargs: "# Contact us\n\nSupport\n\nAgents",
+    )
+
+    markdown = extract_main_markdown(html, url="https://example.com/contact-us")
+
+    assert "Call us at (800) 585-0705" in markdown
+    assert "Email us at support@example.com" in markdown
+    assert "Monday - Friday 7 a.m. - 8 p.m. CT" in markdown
+    assert "(650) 426-0546" in markdown
+    assert "Privacy Policy" not in markdown
 
 
 def test_discover_whitelisted_urls_uses_strict_router_from_homepage_links() -> None:
