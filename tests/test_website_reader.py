@@ -22,7 +22,10 @@ VALID_READER_JSON = {
     "explicit_services_offered": ["advertising", "events", "recruiting"],
     "mentioned_software_or_tools": ["HubSpot"],
     "manual_friction_clues": ["workflow procedures"],
-    "key_executives": ["Jane Doe - CEO"],
+    "key_executives": [
+        {"name": "Jane Doe", "post": "CEO", "email": None},
+        {"name": "John Smith", "post": None, "email": "john@example.com"},
+    ],
     "job_openings": ["Chief Information Security Officer (CISO)"],
     "contact_emails": [
         {"email": "support@example.com", "name": None, "post": "Support"},
@@ -71,6 +74,15 @@ def test_parse_reader_json_requires_exact_schema_keys() -> None:
     assert parsed == VALID_READER_JSON
 
 
+def test_build_reader_prompt_requests_structured_key_executives() -> None:
+    prompt = build_reader_prompt("# Website context\nUseful text")
+
+    assert "key_executives" in prompt
+    assert "array of objects" in prompt
+    assert "exactly name, post, and email" in prompt
+    assert "use null when post or email is not available" in prompt
+
+
 def test_parse_reader_json_normalizes_single_string_array_fields() -> None:
     gemini_payload = dict(VALID_READER_JSON)
     gemini_payload["manual_friction_clues"] = "Quote flow asks users to call an agent"
@@ -82,15 +94,30 @@ def test_parse_reader_json_normalizes_single_string_array_fields() -> None:
     assert parsed["job_openings"] == ["Chief Information Security Officer (CISO)"]
 
 
-def test_parse_reader_json_allows_null_jobs_and_contact_emails() -> None:
+def test_parse_reader_json_allows_null_jobs_contact_emails_and_executives() -> None:
     gemini_payload = dict(VALID_READER_JSON)
+    gemini_payload["key_executives"] = None
     gemini_payload["job_openings"] = None
     gemini_payload["contact_emails"] = None
 
     parsed = parse_reader_json(json.dumps(gemini_payload))
 
+    assert parsed["key_executives"] is None
     assert parsed["job_openings"] is None
     assert parsed["contact_emails"] is None
+
+
+def test_parse_reader_json_requires_key_executive_objects() -> None:
+    gemini_payload = dict(VALID_READER_JSON)
+    gemini_payload["key_executives"] = [{"name": "Jane Doe", "post": "CEO"}]
+
+    try:
+        parse_reader_json(json.dumps(gemini_payload))
+    except ReaderError as exc:
+        assert "key_executives" in str(exc)
+        assert "name, post, and email" in str(exc)
+    else:
+        raise AssertionError("Expected ReaderError for invalid key executive object")
 
 
 def test_parse_reader_json_requires_contact_email_objects() -> None:

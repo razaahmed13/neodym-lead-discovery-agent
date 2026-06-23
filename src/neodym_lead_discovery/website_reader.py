@@ -19,7 +19,6 @@ ARRAY_STRING_KEYS = [
     "explicit_services_offered",
     "mentioned_software_or_tools",
     "manual_friction_clues",
-    "key_executives",
     "job_openings",
 ]
 
@@ -40,7 +39,13 @@ def build_reader_prompt(website_markdown: str) -> str:
         "explicit_services_offered": ["array of strings, or null"],
         "mentioned_software_or_tools": ["array of strings, or null"],
         "manual_friction_clues": ["array of strings, or null"],
-        "key_executives": ["array of strings, or null"],
+        "key_executives": [
+            {
+                "name": "executive name string",
+                "post": "executive role/title string, or null",
+                "email": "executive email address string, or null",
+            }
+        ],
         "job_openings": ["array of job title strings from career page content, or null"],
         "contact_emails": [
             {
@@ -54,8 +59,8 @@ def build_reader_prompt(website_markdown: str) -> str:
         "Scan this website text. Extract only the following 7 data points into this "
         "strict JSON schema. If a point is not explicitly mentioned, write null. "
         "For explicit_services_offered, mentioned_software_or_tools, "
-        "manual_friction_clues, key_executives, and job_openings, return either an "
-        "array of strings or null; never return a bare string. Do not write a summary. "
+        "manual_friction_clues, and job_openings, return either an array of "
+        "strings or null; never return a bare string. Do not write a summary. "
         "Return only valid JSON with exactly these keys.\n\n"
         "For manual_friction_clues, extract higher-level workflow or automation signals, "
         "not raw nearby text. Do not merely copy generic form fields, phone numbers, or "
@@ -69,6 +74,12 @@ def build_reader_prompt(website_markdown: str) -> str:
         "that may require downstream review.\n\n"
         "For job_openings, extract job titles from career page content only; use "
         "null if no job openings are explicitly present.\n\n"
+        "For key_executives, extract every executive or senior leader explicitly "
+        "mentioned in the raw content. Return null if none are present. Otherwise "
+        "return an array of objects with exactly name, post, and email. The name "
+        "must be the executive's name. The post may be a title or leadership role "
+        "such as CEO, Founder, CTO, President, or Head of Operations. use null "
+        "when post or email is not available.\n\n"
         "For contact_emails, extract every contact email visible in the raw content. "
         "Return null if none are present. Otherwise return an array of objects with "
         "exactly email, name, and post. use null when name or post is not available. "
@@ -176,7 +187,28 @@ def _validate_reader_types(payload: dict[str, Any]) -> None:
         if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
             raise ReaderError(f"{key} must be an array of strings or null.")
 
+    _validate_key_executives(payload["key_executives"])
     _validate_contact_emails(payload["contact_emails"])
+
+
+def _validate_key_executives(value: Any) -> None:
+    if value is None:
+        return
+    if not isinstance(value, list):
+        raise ReaderError("key_executives must be an array of objects or null.")
+    for item in value:
+        if not isinstance(item, dict):
+            raise ReaderError("key_executives must contain objects.")
+        if set(item.keys()) != {"name", "post", "email"}:
+            raise ReaderError(
+                "key_executives objects must contain exactly name, post, and email."
+            )
+        if not isinstance(item["name"], str) or not item["name"].strip():
+            raise ReaderError("key_executives name must be a non-empty string.")
+        if item["post"] is not None and not isinstance(item["post"], str):
+            raise ReaderError("key_executives post must be a string or null.")
+        if item["email"] is not None and not isinstance(item["email"], str):
+            raise ReaderError("key_executives email must be a string or null.")
 
 
 def _validate_contact_emails(value: Any) -> None:
