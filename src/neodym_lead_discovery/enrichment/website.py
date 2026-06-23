@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import json
+import subprocess
+import tempfile
 from collections.abc import Callable
+from pathlib import Path
 from urllib.parse import urljoin, urlparse, urlunparse
 
 import httpx
@@ -18,6 +22,7 @@ from neodym_lead_discovery.models import (
 
 Fetcher = Callable[[str], str]
 JavaScriptRenderer = Callable[[str], str]
+PageEvidenceAnalyzer = Callable[[LeadCandidate, WebsitePageProfile], dict[str, object]]
 
 _RELEVANT_PAGE_TERMS = {
     "about": "about",
@@ -85,6 +90,7 @@ def enrich_public_website(
     *,
     fetcher: Fetcher = fetch_html,
     javascript_renderer: JavaScriptRenderer | None = None,
+    page_evidence_analyzer: PageEvidenceAnalyzer | None = None,
     max_pages: int = 8,
     min_static_text_chars: int = 80,
 ) -> EnrichedCompany:
@@ -135,7 +141,8 @@ def enrich_public_website(
                     queued.add(link)
 
     profiles = _dedupe_profiles(profiles)[:max_pages]
-    return build_enriched_company(candidate, profiles)
+    analyzer = page_evidence_analyzer or analyze_page_with_codex
+    return build_enriched_company(candidate, profiles, page_evidence_analyzer=analyzer)
 
 
 def extract_page_profile(
@@ -162,6 +169,8 @@ def extract_page_profile(
 def build_enriched_company(
     candidate: LeadCandidate,
     page_profiles: list[WebsitePageProfile],
+    *,
+    page_evidence_analyzer: PageEvidenceAnalyzer | None = None,
 ) -> EnrichedCompany:
     if not page_profiles:
         return _empty_enrichment(candidate)
@@ -192,6 +201,7 @@ def build_enriched_company(
     ]
     source_links = _unique([*candidate.source_links, *(profile.url for profile in page_profiles)])
     enriched_candidate = candidate.model_copy(update={"source_links": source_links})
+    analyzer = page_evidence_analyzer or _fallback_page_analysis
     structured_profile = StructuredCompanyProfile(
         company_name=candidate.company_name,
         website=candidate.website,
@@ -203,15 +213,7 @@ def build_enriched_company(
         llm_context={
             "pages_crawled": len(page_profiles),
             "page_evidence": [
-                {
-                    "url": profile.url,
-                    "page_type": profile.page_type,
-                    "title": profile.title,
-                    "headings": profile.headings,
-                    "operational_signals": profile.operational_signals,
-                    "rendered_with_javascript": profile.rendered_with_javascript,
-                    "text_excerpt": profile.text[:1200],
-                }
+                _page_evidence(candidate, profile, analyzer)
                 for profile in page_profiles
             ],
             "evidence_text": "\n\n".join(
@@ -230,6 +232,165 @@ def build_enriched_company(
         page_profiles=page_profiles,
         structured_profile=structured_profile,
     )
+
+
+def _page_evidence(
+    candidate: LeadCandidate,
+    profile: WebsitePageProfile,
+    analyzer: PageEvidenceAnalyzer,
+) -> dict[str, object]:
+    analysis = _normalize_page_analysis(analyzer(candidate, profile), profile)
+    return {
+        "url": profile.url,
+        "page_type": profile.page_type,
+        "title": profile.title,
+        "headings": profile.headings,
+        "operational_signals": profile.operational_signals,
+        "rendered_with_javascript": profile.rendered_with_javascript,
+        **analysis,
+    }
+
+
+def analyze_page_with_codex(
+    candidate: LeadCandidate,
+    profile: WebsitePageProfile,
+    *,
+    timeout_seconds: int = 180,
+) -> dict[str, object]:
+    """Use Codex CLI to summarize one page for automation-relevant lead scoring."""
+    prompt = _codex_page_analysis_prompt(candidate, profile)
+    with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as output_file:
+        output_path = Path(output_file.name)
+
+    command = [
+        "codex",
+        "exec",
+        "--skip-git-repo-check",
+        "--sandbox",
+        "read-only",
+        "--color",
+        "never",
+        "--output-last-message",
+        str(output_path),
+        "-",
+    ]
+    try:
+        subprocess.run(
+            command,
+            input=prompt,
+            text=True,
+            capture_output=True,
+            timeout=timeout_seconds,
+            check=True,
+        )
+        response_text = output_path.read_text(encoding="utf-8")
+        return _normalize_page_analysis(_parse_json_object(response_text), profile)
+    except Exception as exc:
+        fallback = _fallback_page_analysis(candidate, profile)
+        limitations = _string_list(fallback.get("limitations"))
+        fallback["limitations"] = [
+            *limitations,
+            f"Codex page analysis unavailable: {type(exc).__name__}.",
+        ]
+        return fallback
+    finally:
+        output_path.unlink(missing_ok=True)
+
+
+def _codex_page_analysis_prompt(candidate: LeadCandidate, profile: WebsitePageProfile) -> str:
+    page_text = profile.text[:6000]
+    return f"""Return only one valid JSON object.
+
+You are analyzing one public website page for Neodym's lead discovery agent.
+Create a concise, critical page-level analysis for B2B lead scoring.
+
+Focus particularly on processes that appear manual, repetitive, or coordination-heavy and
+could plausibly be automated.
+Do not invent manual processes. If the page does not prove a process is manual, say so in
+limitations.
+Use only the provided page text and metadata.
+
+Required JSON keys:
+- page_summary: string, 1-3 sentences summarizing the page and any automation-relevant operations.
+- manual_process_signals: array of strings. Evidence-backed signals only; use [] if none.
+- automation_opportunities: array of strings. Plausible opportunities tied to the evidence;
+  use [] if none.
+- supporting_excerpt: short exact or near-exact excerpt from the page text that grounds the
+  analysis.
+- limitations: array of strings describing uncertainty, missing proof, or why the page is not
+  useful.
+
+Company: {candidate.company_name}
+Website: {candidate.website or "unknown"}
+Page URL: {profile.url}
+Page type: {profile.page_type}
+Title: {profile.title or ""}
+Headings: {json.dumps(profile.headings, ensure_ascii=False)}
+Detected keyword signals: {json.dumps(profile.operational_signals, ensure_ascii=False)}
+
+Page text:
+{page_text}
+"""
+
+
+def _parse_json_object(text: str) -> dict[str, object]:
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        lines = stripped.splitlines()
+        stripped = "\n".join(lines[1:-1]).strip()
+        if stripped.startswith("json"):
+            stripped = stripped[4:].strip()
+    parsed = json.loads(stripped)
+    if not isinstance(parsed, dict):
+        raise ValueError("Codex page analysis must return a JSON object")
+    return parsed
+
+
+def _normalize_page_analysis(
+    analysis: dict[str, object],
+    profile: WebsitePageProfile,
+) -> dict[str, object]:
+    return {
+        "page_summary": _string_field(analysis.get("page_summary"))
+        or _fallback_summary(profile),
+        "manual_process_signals": _string_list(analysis.get("manual_process_signals")),
+        "automation_opportunities": _string_list(analysis.get("automation_opportunities")),
+        "supporting_excerpt": _string_field(analysis.get("supporting_excerpt"))
+        or profile.text[:500],
+        "limitations": _string_list(analysis.get("limitations")),
+    }
+
+
+def _fallback_page_analysis(
+    candidate: LeadCandidate,
+    profile: WebsitePageProfile,
+) -> dict[str, object]:
+    del candidate
+    limitations = ["No LLM page summary was generated for this page."]
+    if not profile.operational_signals:
+        limitations.append("No operational keyword signals were detected in the page text.")
+    return {
+        "page_summary": _fallback_summary(profile),
+        "manual_process_signals": [],
+        "automation_opportunities": [],
+        "supporting_excerpt": profile.text[:500],
+        "limitations": limitations,
+    }
+
+
+def _fallback_summary(profile: WebsitePageProfile) -> str:
+    title = f"{profile.title}. " if profile.title else ""
+    return f"{title}{profile.text[:240]}".strip()
+
+
+def _string_field(value: object) -> str:
+    return value.strip() if isinstance(value, str) else ""
+
+
+def _string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item.strip() for item in value if isinstance(item, str) and item.strip()]
 
 
 def extract_website_profile(
