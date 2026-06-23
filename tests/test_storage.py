@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, datetime
 
 from neodym_lead_discovery.models import LeadCandidate, QualifiedLead, ScoreBreakdown
@@ -34,6 +35,55 @@ def test_storage_creates_schema_and_upserts_candidates_by_normalized_domain(tmp_
     assert saved is not None
     assert saved.company_name == "ABC Logistics"
     assert saved.discovery_source == "csv"
+
+
+def test_storage_saves_structured_website_facts_without_raw_content(tmp_path):
+    db_path = tmp_path / "leads.sqlite"
+    storage = LeadStorage(db_path)
+    storage.initialize()
+    candidate = LeadCandidate(
+        company_name="SmartTalent",
+        website="https://smarttalentstaffing.com/",
+        industry="Staffing",
+        location="Washington",
+        source_links=["https://smarttalentstaffing.com/"],
+    )
+    candidate_id = storage.upsert_candidate(candidate)
+    facts = {
+        "core_business_model": "Staffing agency",
+        "explicit_services_offered": ["Temporary staffing"],
+        "mentioned_software_or_tools": None,
+        "manual_friction_clues": ["Candidates wait for text-message follow-up."],
+        "key_executives": None,
+        "job_openings": None,
+        "contact_emails": None,
+    }
+
+    fact_id = storage.save_candidate_website_facts(candidate_id, candidate, facts, page_count=4)
+    saved = storage.get_candidate_website_facts(candidate_id)
+
+    assert fact_id > 0
+    assert saved is not None
+    assert saved["candidate_id"] == candidate_id
+    assert saved["company_name"] == "SmartTalent"
+    assert saved["location"] == "Washington"
+    assert saved["industry"] == "Staffing"
+    assert saved["website"] == "https://smarttalentstaffing.com/"
+    assert saved["page_count"] == 4
+    assert saved["facts"] == facts
+
+    with storage._connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM candidate_website_facts WHERE candidate_id = ?",
+            (candidate_id,),
+        ).fetchone()
+    serialized_row = json.dumps(dict(row))
+    assert "Candidates wait for text-message follow-up" in serialized_row
+    assert "# Website context" not in serialized_row
+    assert "## Source:" not in serialized_row
+    row_keys = set(row.keys())
+    assert "raw_content" not in row_keys
+    assert "context" not in row_keys
 
 
 def test_storage_persists_qualified_lead_with_run_state(tmp_path):

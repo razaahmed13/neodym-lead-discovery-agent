@@ -73,6 +73,23 @@ class LeadStorage:
                     UNIQUE(normalized_name, normalized_domain)
                 );
 
+                CREATE TABLE IF NOT EXISTS candidate_website_facts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    candidate_id INTEGER NOT NULL UNIQUE,
+                    company_name TEXT NOT NULL,
+                    location TEXT,
+                    industry TEXT,
+                    website TEXT,
+                    page_count INTEGER NOT NULL CHECK(page_count >= 0),
+                    facts_json TEXT NOT NULL CHECK(json_valid(facts_json)),
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY(candidate_id) REFERENCES candidates(id) ON DELETE CASCADE
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_candidate_website_facts_candidate_id
+                    ON candidate_website_facts(candidate_id);
+
                 CREATE TABLE IF NOT EXISTS qualified_leads (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     run_id INTEGER,
@@ -147,6 +164,82 @@ class LeadStorage:
             (int(row["id"]), LeadCandidate.model_validate_json(row["payload_json"]))
             for row in rows
         ]
+
+    def save_candidate_website_facts(
+        self,
+        candidate_id: int,
+        candidate: LeadCandidate,
+        facts: Mapping[str, Any],
+        page_count: int,
+    ) -> int:
+        """Persist only structured Reader facts for a candidate website.
+
+        The raw website Markdown/content is intentionally not accepted by this method and
+        is never stored in SQLite. The candidate snapshot columns make the fact row easy
+        to inspect while candidate_id remains the canonical join back to candidates.
+        """
+        now = _now_iso()
+        facts_json = json.dumps(dict(facts), sort_keys=True)
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO candidate_website_facts (
+                    candidate_id, company_name, location, industry, website,
+                    page_count, facts_json, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(candidate_id) DO UPDATE SET
+                    company_name = excluded.company_name,
+                    location = excluded.location,
+                    industry = excluded.industry,
+                    website = excluded.website,
+                    page_count = excluded.page_count,
+                    facts_json = excluded.facts_json,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    candidate_id,
+                    candidate.company_name,
+                    candidate.location,
+                    candidate.industry,
+                    candidate.website,
+                    page_count,
+                    facts_json,
+                    now,
+                    now,
+                ),
+            )
+            row = conn.execute(
+                "SELECT id FROM candidate_website_facts WHERE candidate_id = ?",
+                (candidate_id,),
+            ).fetchone()
+            return int(row["id"])
+
+    def get_candidate_website_facts(self, candidate_id: int) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT id, candidate_id, company_name, location, industry, website,
+                       page_count, facts_json, created_at, updated_at
+                FROM candidate_website_facts
+                WHERE candidate_id = ?
+                """,
+                (candidate_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "id": int(row["id"]),
+            "candidate_id": int(row["candidate_id"]),
+            "company_name": row["company_name"],
+            "location": row["location"],
+            "industry": row["industry"],
+            "website": row["website"],
+            "page_count": int(row["page_count"]),
+            "facts": json.loads(row["facts_json"]),
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
 
     def start_run(self, stage: str, metadata: Mapping[str, Any] | None = None) -> int:
         now = _now_iso()

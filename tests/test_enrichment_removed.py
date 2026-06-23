@@ -8,11 +8,13 @@ from neodym_lead_discovery.storage import LeadStorage
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_cli_no_longer_exposes_enrich_command() -> None:
+def test_cli_exposes_structured_website_enrichment_not_legacy_enrich_command() -> None:
     result = CliRunner().invoke(app, ["--help"])
 
     assert result.exit_code == 0
-    assert "enrich" not in result.output.lower()
+    assert "enrich-websites" in result.output
+    assert "structured facts" in result.output
+    assert "enriched-companies" not in result.output.lower()
 
 
 def test_storage_no_longer_creates_or_keeps_enriched_companies_table(tmp_path: Path) -> None:

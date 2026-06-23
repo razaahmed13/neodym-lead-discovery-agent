@@ -25,6 +25,7 @@ from neodym_lead_discovery.storage import LeadStorage
 from neodym_lead_discovery.website_context import (
     DEFAULT_MAX_CHARS,
     WebsiteContextError,
+    fetch_website_context,
     write_website_context,
 )
 from neodym_lead_discovery.website_reader import (
@@ -180,6 +181,93 @@ def discover(
 
     imported_ids = [storage.upsert_candidate(candidate) for candidate in candidates]
     typer.echo(f"Imported {len(imported_ids)} lead candidates into {db_path}")
+
+
+@app.command("enrich-websites")
+def enrich_websites(
+    db_path: Annotated[
+        Path,
+        typer.Option(
+            "--db",
+            help="SQLite database path containing discovered candidates.",
+        ),
+    ] = DEFAULT_DB_PATH,
+    limit: Annotated[
+        int | None,
+        typer.Option("--limit", min=1, help="Maximum number of candidates to enrich."),
+    ] = None,
+    max_chars: Annotated[
+        int | None,
+        typer.Option(
+            "--max-chars",
+            min=500,
+            help=(
+                "Optional maximum characters to keep from extracted visible page text. "
+                "By default, no truncation is applied."
+            ),
+        ),
+    ] = DEFAULT_MAX_CHARS,
+    reader_model: Annotated[
+        str,
+        typer.Option("--reader-model", help="Gemini model for the Reader extraction step."),
+    ] = DEFAULT_READER_MODEL,
+) -> None:
+    """Fetch candidate websites, run Reader extraction, and save structured facts only."""
+    gemini_api_key = _env_value("GEMINI_API_KEY")
+    if not gemini_api_key:
+        typer.echo(
+            "GEMINI_API_KEY is required for website enrichment. Add it to .env or export it.",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
+    storage = LeadStorage(db_path)
+    storage.initialize()
+    run_id = storage.start_run(stage="enrich_websites", metadata={"limit": limit})
+    enriched_count = 0
+    skipped_count = 0
+    failed_count = 0
+
+    for candidate_id, candidate in storage.list_candidates(limit=limit):
+        if not candidate.website:
+            skipped_count += 1
+            continue
+        try:
+            # Keep raw website context in memory only. Do not write it to disk or SQLite.
+            website_context, page_count = fetch_website_context(
+                candidate.website,
+                max_chars=max_chars,
+            )
+            reader_facts = extract_reader_facts(
+                website_context,
+                api_key=gemini_api_key,
+                model=reader_model,
+            )
+            storage.save_candidate_website_facts(
+                candidate_id=candidate_id,
+                candidate=candidate,
+                facts=reader_facts,
+                page_count=page_count,
+            )
+            enriched_count += 1
+        except (WebsiteContextError, ReaderError) as exc:
+            failed_count += 1
+            typer.echo(f"Failed to enrich {candidate.company_name}: {exc}", err=True)
+
+    status = "completed" if failed_count == 0 else "completed_with_errors"
+    storage.finish_run(
+        run_id,
+        status=status,
+        metadata={
+            "enriched_count": enriched_count,
+            "skipped_count": skipped_count,
+            "failed_count": failed_count,
+        },
+    )
+    typer.echo(
+        f"Enriched {enriched_count} candidate website(s); "
+        f"skipped {skipped_count}; failed {failed_count}."
+    )
 
 
 @app.command("fetch-website")
