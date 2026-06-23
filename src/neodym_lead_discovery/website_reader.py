@@ -14,7 +14,7 @@ READER_SCHEMA_KEYS = [
     "key_executives",
 ]
 
-DEFAULT_READER_MODEL = "gemini-1.5-flash"
+DEFAULT_READER_MODEL = "gemini-2.0-flash"
 GEMINI_ENDPOINT_TEMPLATE = (
     "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 )

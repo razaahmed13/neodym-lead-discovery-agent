@@ -5,11 +5,17 @@ from typer.testing import CliRunner
 
 from neodym_lead_discovery.cli import app
 from neodym_lead_discovery.website_reader import (
+    DEFAULT_READER_MODEL,
     READER_SCHEMA_KEYS,
     ReaderError,
     build_reader_prompt,
     parse_reader_json,
 )
+
+
+def test_default_reader_model_is_available_gemini_flash_model() -> None:
+    assert DEFAULT_READER_MODEL == "gemini-2.0-flash"
+
 
 VALID_READER_JSON = {
     "core_business_model": "Insurance media and talent development platform",
@@ -59,7 +65,7 @@ def test_fetch_website_can_write_reader_output_file(tmp_path: Path, monkeypatch)
     def fake_extract_reader_facts(markdown: str, api_key: str, model: str):
         assert "Insurance Nerds offers advertising" in markdown
         assert api_key == "test-gemini-key"
-        assert model == "gemini-1.5-flash"
+        assert model == DEFAULT_READER_MODEL
         return VALID_READER_JSON
 
     monkeypatch.setattr(
