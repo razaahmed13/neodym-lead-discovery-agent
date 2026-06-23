@@ -70,7 +70,7 @@ If `APOLLO_API_KEY` is set and no CSV is provided, Apollo API discovery is the d
 uv run lead-discovery discover --db data/lead_discovery.sqlite
 ```
 
-Default Apollo filters target US organizations in Neodym-relevant categories such as healthcare, legal services, logistics, insurance, recruiting, professional services, and software, with operational/automation keywords.
+Default Apollo filters target US organizations in Tier 1/Tier 2 workflow-automation markets: insurance, healthcare, medical practices, mental health, legal/law, staffing/recruiting, HR, logistics/supply chain, transportation/trucking/railroad, warehousing, facilities services, construction, real estate, financial services, accounting, consumer services, and automotive. Apollo industry values are post-filtered locally with accepted wording variations, so related tags such as `Hospitals and Health Care`, `Medical Practices`, `Truck Transportation`, `Warehousing and Storage`, and `Real Estate Agents and Brokers` are kept while noisy industries such as `Publishing` are rejected.
 
 You can override filters:
 

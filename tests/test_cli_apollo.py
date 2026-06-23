@@ -1,6 +1,7 @@
 from typer.testing import CliRunner
 
 from neodym_lead_discovery.cli import DEFAULT_DB_PATH, app
+from neodym_lead_discovery.discovery.apollo_api import ALLOWED_APOLLO_INDUSTRIES
 
 runner = CliRunner()
 
@@ -27,14 +28,7 @@ def test_discover_with_apollo_api_imports_companies_from_env_key(monkeypatch, tm
         assert max_results == 2
         assert per_page == 2
         assert locations == ["United States"]
-        assert industries == [
-            "logistics",
-            "insurance",
-            "staffing and recruiting",
-            "legal services",
-            "healthcare operations",
-            "professional services",
-        ]
+        assert industries == ALLOWED_APOLLO_INDUSTRIES
         assert keywords == [
             "claims processing",
             "back office",

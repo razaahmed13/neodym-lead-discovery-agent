@@ -2,6 +2,7 @@ import httpx
 import pytest
 
 from neodym_lead_discovery.discovery.apollo_api import (
+    ALLOWED_APOLLO_INDUSTRIES,
     ApolloApiError,
     ApolloClient,
     ApolloSearchConfig,
@@ -80,18 +81,103 @@ def test_default_apollo_search_config_targets_smb_and_mid_market_filters():
         "101,200",
         "201,500",
     ]
-    assert payload["q_organization_keyword_tags"] == [
-        "logistics",
-        "insurance",
-        "staffing and recruiting",
-        "legal services",
-        "healthcare operations",
-        "professional services",
-    ]
+    assert payload["q_organization_keyword_tags"] == ALLOWED_APOLLO_INDUSTRIES
     assert payload["q_organization_keywords"] == (
         "claims processing OR back office OR document processing OR customer operations OR "
         "dispatch OR intake OR scheduling OR compliance"
     )
+
+
+def test_allowed_apollo_industries_cover_tier_1_and_tier_2_workflow_markets():
+    assert ALLOWED_APOLLO_INDUSTRIES == [
+        "insurance",
+        "hospital & health care",
+        "medical practice",
+        "mental health care",
+        "legal services",
+        "law practice",
+        "staffing and recruiting",
+        "human resources",
+        "logistics and supply chain",
+        "transportation/trucking/railroad",
+        "warehousing",
+        "facilities services",
+        "construction",
+        "real estate",
+        "financial services",
+        "accounting",
+        "consumer services",
+        "automotive",
+    ]
+
+
+def test_discover_from_apollo_keeps_allowed_industry_variations_and_rejects_noise():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "organizations": [
+                    {"name": "Regional Claims Co", "industry": "Insurance"},
+                    {"name": "Clinic Ops Group", "industry": "Hospitals and Health Care"},
+                    {"name": "Dental Workflow LLC", "industry": "Medical Practices"},
+                    {"name": "Trucking Dispatch Inc", "industry": "Truck Transportation"},
+                    {"name": "Warehouse Crew Co", "industry": "Warehousing and Storage"},
+                    {"name": "Property Desk LLC", "industry": "Real Estate Agents and Brokers"},
+                    {"name": "Repair Workflow Shop", "industry": "Motor Vehicle Manufacturing"},
+                    {"name": "Book Print Media", "industry": "Publishing"},
+                    {"name": "Generic Unknown Ops", "industry": None},
+                ],
+                "pagination": {"page": 1, "per_page": 25, "total_entries": 9},
+            },
+        )
+
+    client = ApolloClient(
+        api_key="test-key",
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    candidates = discover_from_apollo(client=client, max_results=10)
+
+    assert [candidate.company_name for candidate in candidates] == [
+        "Regional Claims Co",
+        "Clinic Ops Group",
+        "Dental Workflow LLC",
+        "Trucking Dispatch Inc",
+        "Warehouse Crew Co",
+        "Property Desk LLC",
+        "Repair Workflow Shop",
+    ]
+
+
+def test_discover_from_apollo_rejects_publishing_even_when_employee_range_matches():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "organizations": [
+                    {
+                        "name": "Publisher Back Office",
+                        "industry": "Publishing",
+                        "estimated_num_employees": 120,
+                    },
+                    {
+                        "name": "Accounting Ops Firm",
+                        "industry": "Accounting",
+                        "estimated_num_employees": 75,
+                    },
+                ],
+                "pagination": {"page": 1, "per_page": 25, "total_entries": 2},
+            },
+        )
+
+    client = ApolloClient(
+        api_key="test-key",
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    candidates = discover_from_apollo(client=client, max_results=10)
+
+    assert [candidate.company_name for candidate in candidates] == ["Accounting Ops Firm"]
 
 
 def test_discover_from_apollo_filters_out_companies_outside_employee_range():
@@ -100,9 +186,21 @@ def test_discover_from_apollo_filters_out_companies_outside_employee_range():
             200,
             json={
                 "organizations": [
-                    {"name": "Tiny Solo", "estimated_num_employees": 5},
-                    {"name": "Regional Claims Co", "estimated_num_employees": 120},
-                    {"name": "Mega Consulting", "estimated_num_employees": 465000},
+                    {
+                        "name": "Tiny Solo",
+                        "industry": "Insurance",
+                        "estimated_num_employees": 5,
+                    },
+                    {
+                        "name": "Regional Claims Co",
+                        "industry": "Insurance",
+                        "estimated_num_employees": 120,
+                    },
+                    {
+                        "name": "Mega Consulting",
+                        "industry": "Insurance",
+                        "estimated_num_employees": 465000,
+                    },
                 ],
                 "pagination": {"page": 1, "per_page": 25, "total_entries": 3},
             },
@@ -137,7 +235,11 @@ def test_discover_from_apollo_paginates_until_requested_limit():
             200,
             json={
                 "organizations": [
-                    {"name": name, "website_url": f"https://{name.split()[0].lower()}.example"}
+                    {
+                        "name": name,
+                        "industry": "Logistics and Supply Chain",
+                        "website_url": f"https://{name.split()[0].lower()}.example",
+                    }
                     for name in names
                 ],
                 "pagination": {"page": page, "per_page": 2, "total_entries": 3},

@@ -9,14 +9,53 @@ from neodym_lead_discovery.models import LeadCandidate, SourceEvidence
 
 APOLLO_COMPANY_SEARCH_URL = "https://api.apollo.io/api/v1/organizations/search"
 DEFAULT_APOLLO_LOCATIONS = ["United States"]
-DEFAULT_APOLLO_INDUSTRIES = [
-    "logistics",
+ALLOWED_APOLLO_INDUSTRIES = [
     "insurance",
-    "staffing and recruiting",
+    "hospital & health care",
+    "medical practice",
+    "mental health care",
     "legal services",
-    "healthcare operations",
-    "professional services",
+    "law practice",
+    "staffing and recruiting",
+    "human resources",
+    "logistics and supply chain",
+    "transportation/trucking/railroad",
+    "warehousing",
+    "facilities services",
+    "construction",
+    "real estate",
+    "financial services",
+    "accounting",
+    "consumer services",
+    "automotive",
 ]
+DEFAULT_APOLLO_INDUSTRIES = ALLOWED_APOLLO_INDUSTRIES
+APOLLO_ALLOWED_INDUSTRY_VARIATIONS = {
+    "insurance": ("insurance", "claims"),
+    "hospital & health care": ("hospital", "health care", "healthcare"),
+    "medical practice": ("medical practice", "medical practices", "clinic", "dental"),
+    "mental health care": ("mental health", "behavioral health"),
+    "legal services": ("legal", "legal services"),
+    "law practice": ("law practice", "law firm"),
+    "staffing and recruiting": ("staffing", "recruiting", "recruitment"),
+    "human resources": ("human resources", "hr services"),
+    "logistics and supply chain": ("logistics", "supply chain"),
+    "transportation/trucking/railroad": (
+        "transportation",
+        "trucking",
+        "truck transportation",
+        "railroad",
+        "freight",
+    ),
+    "warehousing": ("warehousing", "warehouse", "storage"),
+    "facilities services": ("facilities", "facility services", "janitorial"),
+    "construction": ("construction", "contractor"),
+    "real estate": ("real estate", "property", "brokerage"),
+    "financial services": ("financial services", "finance", "banking", "lending"),
+    "accounting": ("accounting", "bookkeeping", "tax preparation"),
+    "consumer services": ("consumer services", "customer service", "home services"),
+    "automotive": ("automotive", "motor vehicle", "auto repair"),
+}
 DEFAULT_APOLLO_KEYWORDS = [
     "claims processing",
     "back office",
@@ -168,6 +207,7 @@ def discover_from_apollo(
             candidate
             for candidate in result.organizations
             if _candidate_matches_employee_range(candidate, min_employees, max_employees)
+            and _candidate_matches_allowed_industry(candidate)
         )
         if result.total_entries is not None and len(candidates) >= result.total_entries:
             break
@@ -199,6 +239,26 @@ def _candidate_matches_employee_range(
     if min_employees is not None and employee_count < min_employees:
         return False
     return not (max_employees is not None and employee_count > max_employees)
+
+
+def _candidate_matches_allowed_industry(candidate: LeadCandidate) -> bool:
+    normalized_industry = _normalize_industry_text(candidate.industry)
+    if not normalized_industry:
+        return False
+    return any(
+        _normalize_industry_text(variation) in normalized_industry
+        for variations in APOLLO_ALLOWED_INDUSTRY_VARIATIONS.values()
+        for variation in variations
+    )
+
+
+def _normalize_industry_text(value: str | None) -> str:
+    if value is None:
+        return ""
+    normalized_characters = [
+        character.lower() if character.isalnum() else " " for character in value
+    ]
+    return " ".join("".join(normalized_characters).split())
 
 
 def _parse_employee_count(value: str | None) -> int | None:
