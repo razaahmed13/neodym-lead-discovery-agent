@@ -9,15 +9,38 @@ from trafilatura import fetch_url
 
 DEFAULT_MAX_CHARS = 12_000
 WHITELISTED_PATHS = {
+    # Home page variants.
     "/",
+    "/home",
+    # About/company variants.
     "/about",
     "/about-us",
+    "/who-we-are",
     "/our-story",
+    "/our-company",
+    "/company",
+    "/team",
+    "/leadership",
+    # Services/solutions/capabilities variants.
     "/services",
     "/solutions",
     "/what-we-do",
+    "/capabilities",
+    "/industries",
+    "/products",
+    "/offerings",
+    # Career/hiring variants.
+    "/career",
+    "/careers",
+    "/jobs",
+    "/join-us",
+    "/work-with-us",
+    "/open-roles",
+    # Contact/support variants.
     "/contact",
     "/contact-us",
+    "/get-in-touch",
+    "/support",
 }
 
 
@@ -124,8 +147,11 @@ def extract_main_markdown(
 def discover_whitelisted_urls(url: str, fetcher=None) -> list[str]:
     """Discover same-domain pages allowed by the strict stage-2 URL router.
 
-    The router only allows the homepage and exact business-context slugs:
-    /about, /our-story, /services, /solutions, /what-we-do, and /contact.
+    The router only allows the homepage and exact business-context slugs for the
+    required lead-discovery pages: home, about, services, careers, and contact.
+    Each page type includes common syntactic and semantic alternatives, for example
+    /about-us, /who-we-are, /our-company, /what-we-do, /solutions, /careers,
+    /jobs, /contact-us, and /get-in-touch.
     It first tries /sitemap.xml; if no allowed URLs are found there, it falls back to
     homepage links. Blog/news/article/media URLs are excluded by construction.
     """

@@ -121,13 +121,23 @@ def test_extract_main_markdown_decodes_cloudflare_protected_email() -> None:
 def test_discover_whitelisted_urls_uses_strict_router_from_homepage_links() -> None:
     homepage_html = """
     <html><body>
+      <a href="/home">Home</a>
       <a href="/about">About</a>
       <a href="/about-us">About us</a>
+      <a href="/who-we-are">Who we are</a>
+      <a href="/our-company">Our company</a>
+      <a href="/what-we-do">What we do</a>
       <a href="/services/">Services</a>
       <a href="/solutions?ref=nav">Solutions</a>
-      <a href="/what-we-do">What we do</a>
+      <a href="/capabilities">Capabilities</a>
+      <a href="/industries">Industries</a>
+      <a href="/careers">Careers</a>
+      <a href="/jobs">Jobs</a>
+      <a href="/join-us">Join us</a>
       <a href="/contact#form">Contact</a>
       <a href="/contact-us">Contact us</a>
+      <a href="/get-in-touch">Get in touch</a>
+      <a href="/support">Support</a>
       <a href="/blog">Blog</a>
       <a href="/articles/how-to-automate">Article</a>
       <a href="https://other.example/about">External About</a>
@@ -144,24 +154,41 @@ def test_discover_whitelisted_urls_uses_strict_router_from_homepage_links() -> N
 
     assert urls == [
         "https://example.com/",
+        "https://example.com/home",
         "https://example.com/about",
         "https://example.com/about-us",
+        "https://example.com/who-we-are",
+        "https://example.com/our-company",
+        "https://example.com/what-we-do",
         "https://example.com/services/",
         "https://example.com/solutions?ref=nav",
-        "https://example.com/what-we-do",
+        "https://example.com/capabilities",
+        "https://example.com/industries",
+        "https://example.com/careers",
+        "https://example.com/jobs",
+        "https://example.com/join-us",
         "https://example.com/contact#form",
         "https://example.com/contact-us",
+        "https://example.com/get-in-touch",
+        "https://example.com/support",
     ]
 
 
 def test_discover_whitelisted_urls_prefers_sitemap_when_available() -> None:
     sitemap_xml = """
     <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+      <url><loc>https://example.com/home</loc></url>
       <url><loc>https://example.com/about</loc></url>
       <url><loc>https://example.com/about-us</loc></url>
+      <url><loc>https://example.com/who-we-are</loc></url>
+      <url><loc>https://example.com/services</loc></url>
+      <url><loc>https://example.com/solutions</loc></url>
+      <url><loc>https://example.com/careers</loc></url>
+      <url><loc>https://example.com/jobs</loc></url>
       <url><loc>https://example.com/blog</loc></url>
       <url><loc>https://example.com/contact</loc></url>
       <url><loc>https://example.com/contact-us</loc></url>
+      <url><loc>https://example.com/get-in-touch</loc></url>
       <url><loc>https://other.example/services</loc></url>
     </urlset>
     """
@@ -174,10 +201,17 @@ def test_discover_whitelisted_urls_prefers_sitemap_when_available() -> None:
 
     assert urls == [
         "https://example.com/",
+        "https://example.com/home",
         "https://example.com/about",
         "https://example.com/about-us",
+        "https://example.com/who-we-are",
+        "https://example.com/services",
+        "https://example.com/solutions",
+        "https://example.com/careers",
+        "https://example.com/jobs",
         "https://example.com/contact",
         "https://example.com/contact-us",
+        "https://example.com/get-in-touch",
     ]
 
 
