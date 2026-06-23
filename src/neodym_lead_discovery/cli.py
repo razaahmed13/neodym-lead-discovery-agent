@@ -31,6 +31,7 @@ from neodym_lead_discovery.website_context import (
 )
 from neodym_lead_discovery.website_reader import (
     DEFAULT_READER_MODEL,
+    DEFAULT_READER_TIMEOUT_SECONDS,
     ReaderError,
     extract_reader_facts,
 )
@@ -213,14 +214,22 @@ def enrich_websites(
     ] = DEFAULT_MAX_CHARS,
     reader_model: Annotated[
         str,
-        typer.Option("--reader-model", help="Gemini model for the Reader extraction step."),
+        typer.Option("--reader-model", help="Codex CLI model for the Reader extraction step."),
     ] = DEFAULT_READER_MODEL,
+    reader_timeout_seconds: Annotated[
+        int,
+        typer.Option(
+            "--reader-timeout-seconds",
+            min=1,
+            help="Seconds before a single Codex Reader call is killed and retried/skipped.",
+        ),
+    ] = DEFAULT_READER_TIMEOUT_SECONDS,
     reader_delay_seconds: Annotated[
         float,
         typer.Option(
             "--reader-delay-seconds",
             min=0,
-            help="Seconds to pause between Gemini Reader calls to avoid free-tier rate limits.",
+            help="Seconds to pause between Codex Reader calls.",
         ),
     ] = DEFAULT_READER_DELAY_SECONDS,
     reader_retries: Annotated[
@@ -228,7 +237,7 @@ def enrich_websites(
         typer.Option(
             "--reader-retries",
             min=0,
-            help="Retry count for transient Gemini Reader failures such as HTTP 429.",
+            help="Retry count for transient Codex Reader failures such as timeouts.",
         ),
     ] = DEFAULT_READER_RETRIES,
     reader_retry_delay_seconds: Annotated[
@@ -236,25 +245,19 @@ def enrich_websites(
         typer.Option(
             "--reader-retry-delay-seconds",
             min=0,
-            help="Seconds to wait before retrying transient Gemini Reader failures.",
+            help="Seconds to wait before retrying transient Codex Reader failures.",
         ),
     ] = DEFAULT_READER_RETRY_DELAY_SECONDS,
 ) -> None:
     """Fetch candidate websites, run Reader extraction, and save structured facts only."""
-    gemini_api_key = _env_value("GEMINI_API_KEY")
-    if not gemini_api_key:
-        typer.echo(
-            "GEMINI_API_KEY is required for website enrichment. Add it to .env or export it.",
-            err=True,
-        )
-        raise typer.Exit(code=2)
-
     storage = LeadStorage(db_path)
     storage.initialize()
     run_id = storage.start_run(
         stage="enrich_websites",
         metadata={
             "limit": limit,
+            "reader_model": reader_model,
+            "reader_timeout_seconds": reader_timeout_seconds,
             "reader_delay_seconds": reader_delay_seconds,
             "reader_retries": reader_retries,
             "reader_retry_delay_seconds": reader_retry_delay_seconds,
@@ -277,8 +280,8 @@ def enrich_websites(
             )
             reader_facts = _extract_reader_facts_with_retries(
                 website_context,
-                api_key=gemini_api_key,
                 model=reader_model,
+                timeout_seconds=reader_timeout_seconds,
                 retries=reader_retries,
                 retry_delay_seconds=reader_retry_delay_seconds,
             )
@@ -314,21 +317,25 @@ def enrich_websites(
 def _extract_reader_facts_with_retries(
     website_context: str,
     *,
-    api_key: str,
     model: str,
+    timeout_seconds: int,
     retries: int,
     retry_delay_seconds: float,
 ) -> dict[str, object]:
     attempt = 0
     while True:
         try:
-            return extract_reader_facts(website_context, api_key=api_key, model=model)
+            return extract_reader_facts(
+                website_context,
+                model=model,
+                timeout_seconds=timeout_seconds,
+            )
         except ReaderError as exc:
             if attempt >= retries or not _is_retryable_reader_error(exc):
                 raise
             attempt += 1
             typer.echo(
-                f"Reader hit a transient Gemini error; retrying in "
+                f"Reader hit a transient Codex error; retrying in "
                 f"{retry_delay_seconds:g}s ({attempt}/{retries}).",
                 err=True,
             )
@@ -346,7 +353,9 @@ def _is_retryable_reader_error(exc: ReaderError) -> bool:
         "http 504",
         "rate limit",
         "timeout",
+        "timed out",
         "temporarily unavailable",
+        "exit code 124",
     )
     return any(marker in message for marker in retryable_markers)
 
@@ -382,8 +391,16 @@ def fetch_website(
     ] = None,
     reader_model: Annotated[
         str,
-        typer.Option("--reader-model", help="Gemini model for the Reader extraction step."),
+        typer.Option("--reader-model", help="Codex CLI model for the Reader extraction step."),
     ] = DEFAULT_READER_MODEL,
+    reader_timeout_seconds: Annotated[
+        int,
+        typer.Option(
+            "--reader-timeout-seconds",
+            min=1,
+            help="Seconds before the Codex Reader call is killed.",
+        ),
+    ] = DEFAULT_READER_TIMEOUT_SECONDS,
 ) -> None:
     """Fetch one website and write visible-text Markdown context."""
     try:
@@ -400,19 +417,11 @@ def fetch_website(
     if reader_output_path is None:
         return
 
-    gemini_api_key = _env_value("GEMINI_API_KEY")
-    if not gemini_api_key:
-        typer.echo(
-            "GEMINI_API_KEY is required for --reader-output. Add it to .env or export it.",
-            err=True,
-        )
-        raise typer.Exit(code=2)
-
     try:
         reader_facts = extract_reader_facts(
             written_path.read_text(),
-            api_key=gemini_api_key,
             model=reader_model,
+            timeout_seconds=reader_timeout_seconds,
         )
     except ReaderError as exc:
         typer.echo(str(exc), err=True)

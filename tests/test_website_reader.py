@@ -1,4 +1,5 @@
 import json
+import subprocess
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -6,15 +7,66 @@ from typer.testing import CliRunner
 from neodym_lead_discovery.cli import app
 from neodym_lead_discovery.website_reader import (
     DEFAULT_READER_MODEL,
+    DEFAULT_READER_TIMEOUT_SECONDS,
     READER_SCHEMA_KEYS,
     ReaderError,
     build_reader_prompt,
+    extract_reader_facts,
     parse_reader_json,
 )
 
 
-def test_default_reader_model_is_available_gemini_flash_model() -> None:
-    assert DEFAULT_READER_MODEL == "gemini-2.0-flash"
+def test_default_reader_model_matches_supported_codex_chatgpt_model() -> None:
+    assert DEFAULT_READER_MODEL == "gpt-5.5"
+    assert DEFAULT_READER_TIMEOUT_SECONDS == 180
+
+
+def test_extract_reader_facts_uses_codex_cli_with_timeout_and_output_file(monkeypatch, tmp_path):
+    output_payload = json.dumps(VALID_READER_JSON)
+    captured = {}
+
+    def fake_run(command, *, input, text, capture_output, timeout, check):
+        captured["command"] = command
+        captured["input"] = input
+        captured["timeout"] = timeout
+        output_index = command.index("--output-last-message") + 1
+        Path(command[output_index]).write_text(output_payload)
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("neodym_lead_discovery.website_reader.subprocess.run", fake_run)
+    monkeypatch.setenv("TMPDIR", str(tmp_path))
+
+    facts = extract_reader_facts(
+        "# Website context\nUseful text",
+        model="gpt-5-nano",
+        timeout_seconds=42,
+    )
+
+    assert facts == VALID_READER_JSON
+    command = captured["command"]
+    assert command[:2] == ["codex", "exec"]
+    assert "--skip-git-repo-check" in command
+    assert "--sandbox" in command
+    assert "read-only" in command
+    assert "--model" in command
+    assert command[command.index("--model") + 1] == "gpt-5-nano"
+    assert command[-1] == "-"
+    assert captured["timeout"] == 42
+    assert "Return only valid JSON" in captured["input"]
+
+
+def test_extract_reader_facts_raises_reader_error_on_codex_timeout(monkeypatch):
+    def fake_run(command, **kwargs):
+        raise subprocess.TimeoutExpired(command, timeout=kwargs["timeout"])
+
+    monkeypatch.setattr("neodym_lead_discovery.website_reader.subprocess.run", fake_run)
+
+    try:
+        extract_reader_facts("# Website context", timeout_seconds=5)
+    except ReaderError as exc:
+        assert "Codex Reader timed out after 5s" in str(exc)
+    else:
+        raise AssertionError("Expected ReaderError for Codex timeout")
 
 
 VALID_READER_JSON = {
@@ -84,23 +136,23 @@ def test_build_reader_prompt_requests_structured_key_executives() -> None:
 
 
 def test_parse_reader_json_normalizes_single_string_array_fields() -> None:
-    gemini_payload = dict(VALID_READER_JSON)
-    gemini_payload["manual_friction_clues"] = "Quote flow asks users to call an agent"
-    gemini_payload["job_openings"] = "Chief Information Security Officer (CISO)"
+    reader_payload = dict(VALID_READER_JSON)
+    reader_payload["manual_friction_clues"] = "Quote flow asks users to call an agent"
+    reader_payload["job_openings"] = "Chief Information Security Officer (CISO)"
 
-    parsed = parse_reader_json(json.dumps(gemini_payload))
+    parsed = parse_reader_json(json.dumps(reader_payload))
 
     assert parsed["manual_friction_clues"] == ["Quote flow asks users to call an agent"]
     assert parsed["job_openings"] == ["Chief Information Security Officer (CISO)"]
 
 
 def test_parse_reader_json_allows_null_jobs_contact_emails_and_executives() -> None:
-    gemini_payload = dict(VALID_READER_JSON)
-    gemini_payload["key_executives"] = None
-    gemini_payload["job_openings"] = None
-    gemini_payload["contact_emails"] = None
+    reader_payload = dict(VALID_READER_JSON)
+    reader_payload["key_executives"] = None
+    reader_payload["job_openings"] = None
+    reader_payload["contact_emails"] = None
 
-    parsed = parse_reader_json(json.dumps(gemini_payload))
+    parsed = parse_reader_json(json.dumps(reader_payload))
 
     assert parsed["key_executives"] is None
     assert parsed["job_openings"] is None
@@ -108,11 +160,11 @@ def test_parse_reader_json_allows_null_jobs_contact_emails_and_executives() -> N
 
 
 def test_parse_reader_json_requires_key_executive_objects() -> None:
-    gemini_payload = dict(VALID_READER_JSON)
-    gemini_payload["key_executives"] = [{"name": "Jane Doe", "post": "CEO"}]
+    reader_payload = dict(VALID_READER_JSON)
+    reader_payload["key_executives"] = [{"name": "Jane Doe", "post": "CEO"}]
 
     try:
-        parse_reader_json(json.dumps(gemini_payload))
+        parse_reader_json(json.dumps(reader_payload))
     except ReaderError as exc:
         assert "key_executives" in str(exc)
         assert "name, post, and email" in str(exc)
@@ -121,11 +173,11 @@ def test_parse_reader_json_requires_key_executive_objects() -> None:
 
 
 def test_parse_reader_json_requires_contact_email_objects() -> None:
-    gemini_payload = dict(VALID_READER_JSON)
-    gemini_payload["contact_emails"] = [{"email": "support@example.com", "name": None}]
+    reader_payload = dict(VALID_READER_JSON)
+    reader_payload["contact_emails"] = [{"email": "support@example.com", "name": None}]
 
     try:
-        parse_reader_json(json.dumps(gemini_payload))
+        parse_reader_json(json.dumps(reader_payload))
     except ReaderError as exc:
         assert "contact_emails" in str(exc)
         assert "email, name, and post" in str(exc)
@@ -153,10 +205,10 @@ def test_fetch_website_can_write_reader_output_file(tmp_path: Path, monkeypatch)
         output_path.write_text("# Website context\n\nInsurance Nerds offers advertising.")
         return output_path, 1
 
-    def fake_extract_reader_facts(markdown: str, api_key: str, model: str):
+    def fake_extract_reader_facts(markdown: str, model: str, timeout_seconds: int):
         assert "Insurance Nerds offers advertising" in markdown
-        assert api_key == "test-gemini-key"
         assert model == DEFAULT_READER_MODEL
+        assert timeout_seconds == DEFAULT_READER_TIMEOUT_SECONDS
         return VALID_READER_JSON
 
     monkeypatch.setattr(
@@ -167,7 +219,6 @@ def test_fetch_website_can_write_reader_output_file(tmp_path: Path, monkeypatch)
         "neodym_lead_discovery.cli.extract_reader_facts",
         fake_extract_reader_facts,
     )
-    monkeypatch.setenv("GEMINI_API_KEY", "test-gemini-key")
 
     result = CliRunner().invoke(
         app,
@@ -187,7 +238,7 @@ def test_fetch_website_can_write_reader_output_file(tmp_path: Path, monkeypatch)
     assert "Wrote reader fact sheet" in result.output
 
 
-def test_reader_output_requires_gemini_api_key(tmp_path: Path, monkeypatch) -> None:
+def test_reader_output_uses_codex_without_gemini_api_key(tmp_path: Path, monkeypatch) -> None:
     raw_output = tmp_path / "example-context.md"
     reader_output = tmp_path / "example-reader.json"
 
@@ -198,6 +249,10 @@ def test_reader_output_requires_gemini_api_key(tmp_path: Path, monkeypatch) -> N
     monkeypatch.setattr(
         "neodym_lead_discovery.cli.write_website_context",
         fake_write_website_context,
+    )
+    monkeypatch.setattr(
+        "neodym_lead_discovery.cli.extract_reader_facts",
+        lambda markdown, model, timeout_seconds: VALID_READER_JSON,
     )
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.chdir(tmp_path)
@@ -214,6 +269,5 @@ def test_reader_output_requires_gemini_api_key(tmp_path: Path, monkeypatch) -> N
         ],
     )
 
-    assert result.exit_code == 2
-    assert "GEMINI_API_KEY is required" in result.output
-    assert not reader_output.exists()
+    assert result.exit_code == 0, result.output
+    assert json.loads(reader_output.read_text()) == VALID_READER_JSON

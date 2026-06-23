@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
+import tempfile
 from typing import Any
-
-import httpx
 
 READER_SCHEMA_KEYS = [
     "core_business_model",
@@ -22,10 +22,8 @@ ARRAY_STRING_KEYS = [
     "job_openings",
 ]
 
-DEFAULT_READER_MODEL = "gemini-2.0-flash"
-GEMINI_ENDPOINT_TEMPLATE = (
-    "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-)
+DEFAULT_READER_MODEL = "gpt-5.5"
+DEFAULT_READER_TIMEOUT_SECONDS = 180
 
 
 class ReaderError(RuntimeError):
@@ -93,12 +91,16 @@ def build_reader_prompt(website_markdown: str) -> str:
 
 def extract_reader_facts(
     website_markdown: str,
-    api_key: str,
     model: str = DEFAULT_READER_MODEL,
+    timeout_seconds: int = DEFAULT_READER_TIMEOUT_SECONDS,
 ) -> dict[str, Any]:
-    """Use Gemini Flash as the cheap Reader to convert Markdown into a compact fact sheet."""
+    """Use Codex CLI to convert Markdown into a compact fact sheet."""
     prompt = build_reader_prompt(website_markdown)
-    response_text = _call_gemini(prompt=prompt, api_key=api_key, model=model)
+    response_text = _call_codex_reader(
+        prompt=prompt,
+        model=model,
+        timeout_seconds=timeout_seconds,
+    )
     return parse_reader_json(response_text)
 
 
@@ -125,38 +127,48 @@ def parse_reader_json(response_text: str) -> dict[str, Any]:
     return {key: payload[key] for key in READER_SCHEMA_KEYS}
 
 
-def _call_gemini(prompt: str, api_key: str, model: str) -> str:
-    endpoint = GEMINI_ENDPOINT_TEMPLATE.format(model=model)
-    try:
-        response = httpx.post(
-            endpoint,
-            params={"key": api_key},
-            json={
-                "contents": [
-                    {
-                        "role": "user",
-                        "parts": [{"text": prompt}],
-                    }
-                ],
-                "generationConfig": {
-                    "temperature": 0,
-                    "responseMimeType": "application/json",
-                },
-            },
-            timeout=60,
-        )
-    except httpx.RequestError as exc:
-        raise ReaderError(f"Gemini Reader request failed: {exc.__class__.__name__}") from exc
-    try:
-        response.raise_for_status()
-    except httpx.HTTPStatusError as exc:
-        raise ReaderError(f"Gemini Reader request failed: HTTP {response.status_code}") from exc
+def _call_codex_reader(prompt: str, model: str, timeout_seconds: int) -> str:
+    with tempfile.NamedTemporaryFile("w+", suffix=".json", delete=True) as output_file:
+        command = [
+            "codex",
+            "exec",
+            "--skip-git-repo-check",
+            "--sandbox",
+            "read-only",
+            "--color",
+            "never",
+            "--model",
+            model,
+            "--output-last-message",
+            output_file.name,
+            "-",
+        ]
+        try:
+            result = subprocess.run(
+                command,
+                input=prompt,
+                text=True,
+                capture_output=True,
+                timeout=timeout_seconds,
+                check=False,
+            )
+        except FileNotFoundError as exc:
+            raise ReaderError("Codex Reader failed: codex CLI was not found on PATH.") from exc
+        except subprocess.TimeoutExpired as exc:
+            raise ReaderError(f"Codex Reader timed out after {timeout_seconds:g}s") from exc
 
-    data = response.json()
-    try:
-        return data["candidates"][0]["content"]["parts"][0]["text"]
-    except (KeyError, IndexError, TypeError) as exc:
-        raise ReaderError("Gemini Reader response did not contain text output.") from exc
+        if result.returncode != 0:
+            stderr = result.stderr.strip()
+            detail = f": {stderr}" if stderr else ""
+            raise ReaderError(f"Codex Reader failed with exit code {result.returncode}{detail}")
+
+        response_text = output_file.read().strip()
+        if not response_text:
+            stdout = result.stdout.strip()
+            if stdout:
+                return stdout
+            raise ReaderError("Codex Reader response did not contain text output.")
+        return response_text
 
 
 def _strip_json_fences(response_text: str) -> str:
@@ -168,7 +180,7 @@ def _strip_json_fences(response_text: str) -> str:
 
 
 def _normalize_reader_types(payload: dict[str, Any]) -> None:
-    """Tolerate common Gemini JSON drift without losing strict output shape."""
+    """Tolerate common reader JSON drift without losing strict output shape."""
     for key in ARRAY_STRING_KEYS:
         value = payload[key]
         if isinstance(value, str):

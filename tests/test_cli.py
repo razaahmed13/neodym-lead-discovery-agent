@@ -54,9 +54,10 @@ def test_enrich_websites_fetches_reader_facts_into_db_without_raw_files(
             "Raw page text"
         ), 4
 
-    def fake_extract_reader_facts(markdown: str, api_key: str, model: str):
+    def fake_extract_reader_facts(markdown: str, model: str, timeout_seconds: int):
         captured_markdown.append(markdown)
-        assert api_key == "test-gemini-key"
+        assert model == "gpt-5.5"
+        assert timeout_seconds == 180
         return {
             "core_business_model": "Staffing agency",
             "explicit_services_offered": ["Temporary staffing"],
@@ -72,7 +73,6 @@ def test_enrich_websites_fetches_reader_facts_into_db_without_raw_files(
         fake_fetch_website_context,
     )
     monkeypatch.setattr("neodym_lead_discovery.cli.extract_reader_facts", fake_extract_reader_facts)
-    monkeypatch.setenv("GEMINI_API_KEY", "test-gemini-key")
 
     result = runner.invoke(app, ["enrich-websites", "--db", str(db_path)])
 
@@ -112,10 +112,10 @@ def test_enrich_websites_retries_reader_rate_limits_and_throttles_between_candid
     def fake_fetch_website_context(url: str, max_chars=None):
         return f"# Context for {url}", 1
 
-    def fake_extract_reader_facts(markdown: str, api_key: str, model: str):
+    def fake_extract_reader_facts(markdown: str, model: str, timeout_seconds: int):
         reader_calls.append(markdown)
         if len(reader_calls) == 1:
-            raise ReaderError("Gemini Reader request failed: HTTP 429")
+            raise ReaderError("Codex Reader timed out after 180s")
         return {
             "core_business_model": "Insurance operations",
             "explicit_services_offered": None,
@@ -132,7 +132,6 @@ def test_enrich_websites_retries_reader_rate_limits_and_throttles_between_candid
     )
     monkeypatch.setattr("neodym_lead_discovery.cli.extract_reader_facts", fake_extract_reader_facts)
     monkeypatch.setattr(cli_module, "sleep", sleeps.append, raising=False)
-    monkeypatch.setenv("GEMINI_API_KEY", "test-gemini-key")
 
     result = runner.invoke(
         app,
@@ -146,6 +145,8 @@ def test_enrich_websites_retries_reader_rate_limits_and_throttles_between_candid
             "1",
             "--reader-retry-delay-seconds",
             "7",
+            "--reader-timeout-seconds",
+            "180",
         ],
     )
 
