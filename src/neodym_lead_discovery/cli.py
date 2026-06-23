@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -25,6 +26,11 @@ from neodym_lead_discovery.website_context import (
     DEFAULT_MAX_CHARS,
     WebsiteContextError,
     write_website_context,
+)
+from neodym_lead_discovery.website_reader import (
+    DEFAULT_READER_MODEL,
+    ReaderError,
+    extract_reader_facts,
 )
 
 app = typer.Typer(
@@ -195,6 +201,17 @@ def fetch_website(
             help="Maximum characters to keep from the extracted main-body Markdown.",
         ),
     ] = DEFAULT_MAX_CHARS,
+    reader_output_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--reader-output",
+            help="JSON file where the cheap Reader LLM fact sheet will be written.",
+        ),
+    ] = None,
+    reader_model: Annotated[
+        str,
+        typer.Option("--reader-model", help="Gemini model for the Reader extraction step."),
+    ] = DEFAULT_READER_MODEL,
 ) -> None:
     """Fetch one website and write short, anti-boilerplate Markdown context."""
     try:
@@ -207,6 +224,31 @@ def fetch_website(
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
     typer.echo(f"Wrote pruned website context from {page_count} page(s) to {written_path}")
+
+    if reader_output_path is None:
+        return
+
+    gemini_api_key = _env_value("GEMINI_API_KEY")
+    if not gemini_api_key:
+        typer.echo(
+            "GEMINI_API_KEY is required for --reader-output. Add it to .env or export it.",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
+    try:
+        reader_facts = extract_reader_facts(
+            written_path.read_text(),
+            api_key=gemini_api_key,
+            model=reader_model,
+        )
+    except ReaderError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+
+    reader_output_path.parent.mkdir(parents=True, exist_ok=True)
+    reader_output_path.write_text(json.dumps(reader_facts, indent=2) + "\n")
+    typer.echo(f"Wrote reader fact sheet to {reader_output_path}")
 
 
 @app.command()
